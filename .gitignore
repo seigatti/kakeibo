@@ -1,0 +1,20 @@
+# ===== 個人データ（絶対にコミットしない） =====
+*.xlsx
+*.xlsm
+*.csv
+migration/output/
+migration/*.json
+
+# ===== Node =====
+node_modules/
+dist/
+dev-dist/
+*.local
+
+# ===== その他 =====
+.DS_Store
+Thumbs.db
+__pycache__/
+*.pyc
+.env
+.env.*

@@ -1,0 +1,296 @@
+:root {
+  --bg: #0f172a;
+  --bg2: #1e293b;
+  --bg3: #283548;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --accent: #38bdf8;
+  --green: #4ade80;
+  --red: #f87171;
+  --amber: #fbbf24;
+  --border: rgba(148, 163, 184, 0.2);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Hiragino Sans', 'Yu Gothic UI', Meiryo, system-ui, sans-serif;
+  font-size: 15px;
+}
+
+.app {
+  max-width: 640px;
+  margin: 0 auto;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: calc(env(safe-area-inset-top) + 10px) 16px 10px;
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 10;
+  border-bottom: 1px solid var(--border);
+}
+
+.header h1 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.main {
+  flex: 1;
+  padding: 12px 12px calc(env(safe-area-inset-bottom) + 80px);
+}
+
+/* ---- タブバー ---- */
+.tabbar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  max-width: 640px;
+  margin: 0 auto;
+  display: flex;
+  background: var(--bg2);
+  border-top: 1px solid var(--border);
+  padding-bottom: env(safe-area-inset-bottom);
+  z-index: 10;
+}
+
+.tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 0 6px;
+  text-decoration: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.tab.active {
+  color: var(--accent);
+}
+
+.tab-icon {
+  font-size: 20px;
+}
+
+/* ---- 共通部品 ---- */
+.card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.card h2 {
+  font-size: 14px;
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.banner {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 8px 12px 0;
+  font-size: 13px;
+}
+
+.banner.error {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.center {
+  text-align: center;
+}
+
+.big {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.pos {
+  color: var(--green);
+}
+
+.neg {
+  color: var(--red);
+}
+
+/* ---- フォーム ---- */
+label.field {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  margin-top: 4px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 16px; /* iOSのズーム防止 */
+}
+
+input:focus,
+select:focus {
+  outline: 1px solid var(--accent);
+}
+
+button {
+  font-family: inherit;
+}
+
+.btn {
+  display: inline-block;
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #082f49;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+}
+
+.btn.secondary {
+  background: var(--bg3);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.btn.danger {
+  background: transparent;
+  color: var(--red);
+  border: 1px solid var(--red);
+}
+
+.btn.small {
+  width: auto;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.icon-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  width: 34px;
+  height: 34px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+/* ---- リスト・表 ---- */
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.list li:last-child {
+  border-bottom: none;
+}
+
+.kv {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: 14px;
+}
+
+.chart-box {
+  height: 260px;
+}
+
+.chart-box.small {
+  height: 180px;
+}
+
+.seg {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.seg button {
+  flex: 1;
+  padding: 7px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.seg button.on {
+  background: var(--bg3);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+code.wrap {
+  display: block;
+  word-break: break-all;
+  white-space: pre-wrap;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 11px;
+  max-height: 120px;
+  overflow-y: auto;
+}

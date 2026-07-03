@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "kakeibo-web",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "scripts\\dev.cmd"],
+      "autoPort": false,
+      "port": 5173
+    }
+  ]
+}

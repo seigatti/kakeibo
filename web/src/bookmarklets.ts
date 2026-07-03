@@ -28,7 +28,7 @@ if(!w)location.href=u;
 export function zaimBookmarklet(appUrl: string): string {
   const code = `(()=>{
 var t=document.body.innerText;
-var m=t.match(/(?:残高合計|合計残高|残高)[^0-9\\-]*([\\-]?[0-9,]+)\\s*円?/);
+var m=t.match(/(?:合計残高|残高合計|合計)[：:\\s]*[¥￥]?\\s*(-?[0-9][0-9,]*)/);
 var c=m?m[1].replace(/[,，]/g,''):'';
 if(!c)c=prompt('合計残高を自動検出できませんでした。金額を貼り付けてください','')||'';
 if(!c)return;

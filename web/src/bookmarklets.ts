@@ -19,7 +19,8 @@ var pen=g(/年金[^0-9\\-]*([0-9,]+)\\s*円/);
 if(!inv)inv=prompt('総資産を自動検出できませんでした。金額を貼り付けてください','')||'';
 if(!inv)return;
 var u='${appUrl}#assets?investment='+inv+(prof?'&profit='+prof:'')+(pen?'&pension='+pen:'');
-window.open(u,'_blank');
+var w=window.open(u,'_blank');
+if(!w)location.href=u;
 })()`
   return 'javascript:' + encodeURIComponent(code.replace(/\n/g, ''))
 }
@@ -31,7 +32,9 @@ var m=t.match(/(?:残高合計|合計残高|残高)[^0-9\\-]*([\\-]?[0-9,]+)\\s*
 var c=m?m[1].replace(/[,，]/g,''):'';
 if(!c)c=prompt('合計残高を自動検出できませんでした。金額を貼り付けてください','')||'';
 if(!c)return;
-window.open('${appUrl}#assets?cash='+c,'_blank');
+var u='${appUrl}#assets?cash='+c;
+var w=window.open(u,'_blank');
+if(!w)location.href=u;
 })()`
   return 'javascript:' + encodeURIComponent(code.replace(/\n/g, ''))
 }

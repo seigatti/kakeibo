@@ -79,9 +79,26 @@ export default function Settings() {
         <button className="btn secondary small" style={{ marginTop: 6 }} onClick={() => void copy('zaim', zaimBookmarklet(base))}>
           {copied === 'zaim' ? 'コピーしました ✓' : 'コピー'}
         </button>
-        <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
+        <p className="muted" style={{ fontSize: 12 }}>
           ※ページの作りが変わると自動検出できなくなることがあります。その場合は金額の貼り付けを求められます。
         </p>
+        <p style={{ fontSize: 13, margin: '4px 0' }}>登録と実行のしかた</p>
+        <ul className="muted" style={{ fontSize: 12, paddingLeft: 18, margin: 0 }}>
+          <li style={{ marginBottom: 6 }}>
+            <b>PC (Chrome/Edge)</b>: ブックマークマネージャー（Ctrl+Shift+O）→「新しいブックマークを追加」→
+            URL欄に貼り付け。<b>アドレスバーに直接貼ると「javascript:」が自動で削られて動きません。</b>
+            マネフォ/Zaimのページを開いた状態でブックマークバーからクリック。
+          </li>
+          <li style={{ marginBottom: 6 }}>
+            <b>iPhone (Safari)</b>: 適当なページをいったんブックマーク →
+            ブックマーク一覧で「編集」→ そのブックマークのURLを消してコードを貼り付け・名前を変更。
+            マネフォ/Zaimを開いた状態でブックマーク一覧からタップ。
+          </li>
+          <li>
+            <b>Android (Chrome)</b>: PCと同期したブックマークを使い、マネフォ/Zaimを開いた状態で
+            <b>アドレスバーにブックマーク名を入力</b>して候補から選ぶ（ブックマーク一覧からのタップでは実行されません）。
+          </li>
+        </ul>
       </div>
 
       <div className="card">

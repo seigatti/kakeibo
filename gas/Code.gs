@@ -106,6 +106,9 @@ function handleAction_(body) {
         }
       });
       return getAllData_();
+    case 'setMonthsData': // 複数月分の一括登録（CSVインポート用）
+      setMonthsData_(body.months || []);
+      return getAllData_();
     case 'deleteIncome':
       deleteRows_('income', function (r) { return r.month === body.month; });
       return getAllData_();
@@ -227,6 +230,110 @@ function bulkImport_(body) {
     counts[name] = values.length;
   });
   return { imported: counts };
+}
+
+/** 複数月分の income + expenses を一括反映（シート全体を読み→マージ→書き戻しで高速化） */
+function setMonthsData_(months) {
+  var ss = ss_();
+  var incomeRows = readSheet_(ss, 'income');
+  var expenseRows = readSheet_(ss, 'expenses');
+  months.forEach(function (m) {
+    if (m.income) {
+      incomeRows = incomeRows.filter(function (r) { return r.month !== m.income.month; });
+      incomeRows.push(m.income);
+    }
+    (m.expenses || []).forEach(function (row) {
+      expenseRows = expenseRows.filter(function (r) { return !(r.month === row.month && r.category === row.category); });
+      if (row.amount !== null && row.amount !== undefined && row.amount !== '') expenseRows.push(row);
+    });
+  });
+  incomeRows.sort(function (a, b) { return String(a.month).localeCompare(String(b.month)); });
+  expenseRows.sort(function (a, b) {
+    return String(a.month).localeCompare(String(b.month)) || String(a.category).localeCompare(String(b.category));
+  });
+  rewriteSheet_(ss, 'income', incomeRows);
+  rewriteSheet_(ss, 'expenses', expenseRows);
+}
+
+function rewriteSheet_(ss, name, rows) {
+  var sheet = ss.getSheetByName(name);
+  var headers = SHEET_DEFS[name];
+  if (sheet.getLastRow() > 1) sheet.deleteRows(2, sheet.getLastRow() - 1);
+  if (!rows.length) return;
+  var values = rows.map(function (r) {
+    return headers.map(function (h) {
+      var v = r[h];
+      return v === undefined || v === null ? '' : v;
+    });
+  });
+  sheet.getRange(2, 1, values.length, headers.length).setValues(values);
+}
+
+// ---------------------------------------------------------------- メール自動取り込み
+
+/**
+ * マネーフォワードの定期レポートメール（週次など）から資産総額を読み取り、assets に自動記録する。
+ *
+ * 使い方:
+ * 1. マネーフォワード MEの設定でメール配信（ウィークリーメール）をONにする
+ * 2. GASエディタでこの関数を一度手動実行して Gmail の権限を承認する
+ * 3. エディタ左メニュー「トリガー」→「トリガーを追加」→ 関数 importFromMail /
+ *    イベントのソース「時間主導型」/ 「日付ベースのタイマー」で1日1回に設定
+ *
+ * 仕様:
+ * - 処理済みスレッドには Gmail ラベル「kakeibo取込済」を付けて重複を防ぐ
+ * - マネフォの「資産総額」は年金を含むため、年金額が本文から取れた場合は 投資=総額−年金 とする
+ * - 同じ日付の既存記録（ブックマークレットで入れた現金など）にはマージする
+ * - メール本文の書式が想定と違って取れない場合はログに本文の先頭を出力する（正規表現の調整用）
+ */
+function importFromMail() {
+  var LABEL = 'kakeibo取込済';
+  var label = GmailApp.getUserLabelByName(LABEL) || GmailApp.createLabel(LABEL);
+  var threads = GmailApp.search('from:(moneyforward.com) -label:' + LABEL + ' newer_than:30d');
+  var imported = 0;
+  threads.forEach(function (thread) {
+    var done = false;
+    thread.getMessages().forEach(function (msg) {
+      var body = msg.getPlainBody() || '';
+      var total = matchAmount_(body, /(?:資産総額|総資産)[^0-9\-]{0,20}([0-9,]+)\s*円/);
+      if (total === null) {
+        Logger.log('金額を検出できませんでした: ' + msg.getSubject());
+        Logger.log(body.slice(0, 500));
+        return;
+      }
+      var pension = matchAmount_(body, /年金[^0-9\-]{0,20}([0-9,]+)\s*円/);
+      var date = Utilities.formatDate(msg.getDate(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      var row = {
+        date: date,
+        investment: pension !== null ? total - pension : total,
+        pension: pension,
+        memo: 'メール自動取込',
+      };
+      mergeAssetRow_(row);
+      imported++;
+      done = true;
+    });
+    if (done) thread.addLabel(label);
+  });
+  Logger.log('取込件数: ' + imported);
+  return imported;
+}
+
+function matchAmount_(text, re) {
+  var m = text.match(re);
+  return m ? Number(m[1].replace(/,/g, '')) : null;
+}
+
+/** 同じ日付の既存行があれば null でない項目だけ上書きしてマージ */
+function mergeAssetRow_(row) {
+  var ss = ss_();
+  var existing = readSheet_(ss, 'assets').filter(function (r) { return r.date === row.date; })[0];
+  var merged = existing || {};
+  Object.keys(row).forEach(function (k) {
+    if (row[k] !== null && row[k] !== undefined) merged[k] = row[k];
+  });
+  merged.date = row.date;
+  upsertRow_('assets', 'date', merged);
 }
 
 function json_(obj) {

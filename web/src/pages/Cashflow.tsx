@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Bar, Chart, Line } from 'react-chartjs-2'
 import { useStore } from '../store'
 import { DEFAULT_CATEGORIES } from '../types'
-import { dataMonthRange, expenseByMonth, fixedMonthlyTotal, incomeByMonth, thisMonth, yen, yenShort } from '../utils'
+import { addMonths, dataMonthRange, expenseByMonth, fixedMonthlyTotal, incomeByMonth, thisMonth, yen, yenShort } from '../utils'
+import CsvImportCard from './CsvImportCard'
 
 const PALETTE = ['#38bdf8', '#4ade80', '#fbbf24', '#f87171', '#c084fc', '#fb923c', '#2dd4bf', '#a3e635']
 
@@ -36,6 +37,21 @@ export default function Cashflow() {
 
   const num = (s: string | undefined) => (!s || s.trim() === '' ? null : Number(s.replace(/[,，]/g, '')))
 
+  // 前月コピー: 対象月が未入力のとき、前月の給料・変動費をフォームへ充填
+  const prevMonth = addMonths(month, -1)
+  const prevIncome = data?.income.find((i) => i.month === prevMonth)
+  const prevExpenses = useMemo(() => data?.expenses.filter((e) => e.month === prevMonth) ?? [], [data, prevMonth])
+  const monthIsEmpty =
+    !data?.income.some((i) => i.month === month) && !data?.expenses.some((e) => e.month === month)
+  const copyPrevMonth = () => {
+    setSalary(prevIncome?.salary?.toString() ?? '')
+    setOther(prevIncome?.other?.toString() ?? '')
+    const map: Record<string, string> = {}
+    for (const e of prevExpenses) map[e.category] = String(e.amount)
+    setAmounts(map)
+    setMsg('')
+  }
+
   const save = async () => {
     setMsg('')
     await mutate('setMonthData', {
@@ -68,9 +84,15 @@ export default function Cashflow() {
       <div className="card">
         <h2>収支入力（過去月もOK）</h2>
         <label className="field">対象月<input type="month" value={month} onChange={(e) => { setMonth(e.target.value); setMsg('') }} /></label>
+        {monthIsEmpty && (prevIncome || prevExpenses.length > 0) && (
+          <button className="btn secondary" style={{ marginBottom: 10 }} onClick={copyPrevMonth}>
+            前月（{prevMonth}）の値をコピー
+          </button>
+        )}
         <div className="row2">
           <label className="field">給料（収入）
-            <input type="text" inputMode="numeric" value={salary} onChange={(e) => setSalary(e.target.value)} /></label>
+            <input type="text" inputMode="numeric" value={salary} onChange={(e) => setSalary(e.target.value)}
+              placeholder={prevIncome?.salary ? `前月: ${prevIncome.salary}` : undefined} /></label>
           <label className="field">その他収入
             <input type="text" inputMode="numeric" value={other} onChange={(e) => setOther(e.target.value)} /></label>
         </div>
@@ -94,6 +116,8 @@ export default function Cashflow() {
           ※支出合計には固定費の月割り（{yen(fixedOf(month))}）が自動で加算されます
         </p>
       </div>
+
+      <CsvImportCard categories={categories} />
 
       {chartMonths.length >= 2 && (
         <>

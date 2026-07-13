@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Line } from 'react-chartjs-2'
 import { useStore } from '../store'
 import { assetTotal, sortedAssets, today, yen, yenShort } from '../utils'
 
 type Range = '1y' | '3y' | 'all'
+
+const PREFILL_KEYS = ['investment', 'cash', 'pension', 'profit'] as const
 
 export default function Assets({ prefill }: { prefill: URLSearchParams }) {
   const { data, mutate, saving } = useStore()
@@ -15,30 +17,56 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
   const [memo, setMemo] = useState('')
   const [range, setRange] = useState<Range>('1y')
   const [msg, setMsg] = useState('')
-
-  // ブックマークレットからのプリフィル（#assets?investment=…&profit=…&pension=… / cash=…）
-  useEffect(() => {
-    if (prefill.get('investment')) setInvestment(prefill.get('investment')!)
-    if (prefill.get('cash')) setCash(prefill.get('cash')!)
-    if (prefill.get('pension')) setPension(prefill.get('pension')!)
-    if (prefill.get('profit')) setProfit(prefill.get('profit')!)
-    if (prefill.get('date')) setDate(prefill.get('date')!)
-  }, [prefill])
+  const appliedPrefill = useRef<string | null>(null)
 
   const assets = useMemo(() => sortedAssets(data?.assets ?? []), [data])
 
-  // 同じ日付の既存記録があればフォームに反映（上書き編集）
+  const num = (s: string | undefined) => (!s || s.trim() === '' ? null : Number(s.replace(/[,，]/g, '')))
+
+  /** 指定日の既存記録をフォームへ反映。overrides（プリフィル値）があれば優先 */
+  const applyRow = (d: string, overrides?: Partial<Record<(typeof PREFILL_KEYS)[number], string>>) => {
+    const hit = assets.find((a) => a.date === d)
+    setDate(d)
+    setInvestment(overrides?.investment ?? hit?.investment?.toString() ?? '')
+    setCash(overrides?.cash ?? hit?.cash?.toString() ?? '')
+    setPension(overrides?.pension ?? hit?.pension?.toString() ?? '')
+    setProfit(overrides?.profit ?? hit?.mf_profit?.toString() ?? '')
+    setMemo(hit?.memo ?? '')
+  }
+
+  // ブックマークレットからのプリフィル（#assets?investment=…&autosave=1 など）。
+  // データ読み込み後に一度だけ適用し、autosave=1 なら既存の同日記録とマージして自動保存する。
   useEffect(() => {
-    const hit = assets.find((a) => a.date === date)
-    if (hit) {
-      setInvestment(hit.investment?.toString() ?? '')
-      setCash(hit.cash?.toString() ?? '')
-      setPension(hit.pension?.toString() ?? '')
-      setProfit(hit.mf_profit?.toString() ?? '')
-      setMemo(hit.memo ?? '')
+    if (!data) return
+    const key = prefill.toString()
+    if (!key || appliedPrefill.current === key) return
+    if (!PREFILL_KEYS.some((k) => prefill.get(k)) && !prefill.get('date')) return
+    appliedPrefill.current = key
+
+    const d = prefill.get('date') ?? today()
+    const overrides: Partial<Record<(typeof PREFILL_KEYS)[number], string>> = {}
+    for (const k of PREFILL_KEYS) if (prefill.get(k)) overrides[k] = prefill.get(k)!
+    applyRow(d, overrides)
+
+    if (prefill.get('autosave') === '1') {
+      const hit = assets.find((a) => a.date === d)
+      const row = {
+        date: d,
+        investment: overrides.investment !== undefined ? num(overrides.investment) : (hit?.investment ?? null),
+        cash: overrides.cash !== undefined ? num(overrides.cash) : (hit?.cash ?? null),
+        pension: overrides.pension !== undefined ? num(overrides.pension) : (hit?.pension ?? null),
+        mf_profit: overrides.profit !== undefined ? num(overrides.profit) : (hit?.mf_profit ?? null),
+        memo: hit?.memo ?? '自動記録',
+      }
+      mutate('upsertAsset', { row })
+        .then(() => {
+          setMsg(`${d} に自動保存しました ✓`)
+          history.replaceState(null, '', '#assets')
+        })
+        .catch(() => setMsg('自動保存に失敗しました。内容を確認して保存を押してください'))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [date])
+  }, [data, prefill])
 
   const filtered = useMemo(() => {
     if (range === 'all') return assets
@@ -50,8 +78,6 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
   }, [assets, range])
 
   const profits = filtered.filter((a) => a.mf_profit !== null)
-
-  const num = (s: string) => (s.trim() === '' ? null : Number(s.replace(/[,，]/g, '')))
 
   const save = async () => {
     setMsg('')
@@ -77,7 +103,7 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
     <>
       <div className="card">
         <h2>資産を記録（過去日付もOK）</h2>
-        <label className="field">日付<input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
+        <label className="field">日付<input type="date" value={date} onChange={(e) => applyRow(e.target.value)} /></label>
         <div className="row2">
           <label className="field">投資（マネフォ流動資産）
             <input type="text" inputMode="numeric" placeholder="例: 10070377" value={investment} onChange={(e) => setInvestment(e.target.value)} /></label>
@@ -150,7 +176,7 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
           <ul className="list">
             {[...assets].reverse().slice(0, 50).map((a) => (
               <li key={a.date}>
-                <span className="muted" style={{ cursor: 'pointer' }} onClick={() => setDate(a.date)}>{a.date}</span>
+                <span className="muted" style={{ cursor: 'pointer' }} onClick={() => applyRow(a.date)}>{a.date}</span>
                 <span>{yen(assetTotal(a))}</span>
                 <button className="btn danger small" onClick={() => void remove(a.date)}>削除</button>
               </li>

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { APPLICATION_METHODS, APPLICATION_STATUSES, DEFAULT_PERSONS, type FurusatoItem, type FurusatoPerson } from '../types'
-import { furusatoLimit, yen } from '../utils'
+import { estimateSalary, furusatoLimit, parseBonusConfig, yen } from '../utils'
 import SalaryCard from './SalaryCard'
 
 const EMPTY_ITEM = {
@@ -117,7 +117,22 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
 
   const num = (s: string) => (s.trim() === '' ? null : Number(s.replace(/[,，]/g, '')))
 
-  const limitAuto = furusatoLimit(num(yearForm.income), num(yearForm.social_insurance), num(yearForm.medical_deduction))
+  // 月次給与からの想定（保存済みのボーナス設定を使用）
+  const salaryEst = useMemo(
+    () =>
+      estimateSalary(
+        (data?.furusato_salaries ?? []).filter((s) => s.person === person && Number(s.year) === year),
+        yearInfo?.bonus_base ?? null,
+        parseBonusConfig(yearInfo?.bonus_config),
+      ),
+    [data, person, year, yearInfo],
+  )
+  const socialEstimated = salaryEst && salaryEst.annualSocial > 0 ? salaryEst.annualSocial : null
+  // 社会保険料: 手動入力が無ければ月次給与からの想定値を自動採用（計算上限と同じ「手動優先」方式）
+  const socialAdopted = num(yearForm.social_insurance) ?? socialEstimated
+  const usingEstimatedSocial = num(yearForm.social_insurance) === null && socialEstimated !== null
+
+  const limitAuto = furusatoLimit(num(yearForm.income), socialAdopted, num(yearForm.medical_deduction))
   const limitAdopted = num(yearForm.limit_manual) ?? limitAuto
   const purchased = items.filter((i) => Number(i.year) === year && i.application_status !== '未購入' && i.price)
   const purchasedTotal = purchased.reduce((s, i) => s + (i.price ?? 0), 0)
@@ -266,8 +281,10 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
           <div className="row2" style={{ marginTop: 8 }}>
             <label className="field">年収（税込・想定可）
               <input type="text" inputMode="numeric" value={yearForm.income} onChange={(e) => setYearForm({ ...yearForm, income: e.target.value })} /></label>
-            <label className="field">社会保険料（年額）
-              <input type="text" inputMode="numeric" value={yearForm.social_insurance} onChange={(e) => setYearForm({ ...yearForm, social_insurance: e.target.value })} /></label>
+            <label className="field">社会保険料（年額・空欄なら想定値を採用）
+              <input type="text" inputMode="numeric"
+                placeholder={socialEstimated !== null ? `想定: ${socialEstimated.toLocaleString()}` : ''}
+                value={yearForm.social_insurance} onChange={(e) => setYearForm({ ...yearForm, social_insurance: e.target.value })} /></label>
           </div>
           <div className="row2">
             <label className="field">医療費控除など
@@ -277,6 +294,9 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
           </div>
           <p className="muted" style={{ fontSize: 12 }}>
             計算上限（目安）: <b>{limitAuto !== null ? yen(limitAuto) : '年収を入力してください'}</b><br />
+            {usingEstimatedSocial && (
+              <>※社会保険料は月次給与からの想定値（{yen(socialEstimated)}）を使用中<br /></>
+            )}
             ※給与収入のみ・配偶者控除なしの簡易計算です。住宅ローン控除等がある場合はズレます。
             税額通知書などで正確な値が分かったら「手動指定」に入れてください。
           </p>

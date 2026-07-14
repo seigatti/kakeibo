@@ -142,6 +142,9 @@ function handleAction_(body) {
     case 'setFurusatoSalary':
       upsertRow_('furusato_salaries', ['person', 'year', 'month'], body.row);
       return getAllData_();
+    case 'setFurusatoSalaries': // 複数月の一括保存（他月コピー用。シート読み書き1回で処理）
+      setFurusatoSalaries_(body.rows || []);
+      return getAllData_();
     case 'deleteFurusatoSalary':
       deleteRows_('furusato_salaries', function (r) {
         return r.person === body.person && String(r.year) === String(body.year) && String(r.month) === String(body.month);
@@ -289,6 +292,21 @@ function setMonthsData_(months) {
   });
   rewriteSheet_(ss, 'income', incomeRows);
   rewriteSheet_(ss, 'expenses', expenseRows);
+}
+
+function setFurusatoSalaries_(newRows) {
+  var ss = ss_();
+  var rows = readSheet_(ss, 'furusato_salaries');
+  newRows.forEach(function (nr) {
+    rows = rows.filter(function (r) {
+      return !(r.person === nr.person && String(r.year) === String(nr.year) && String(r.month) === String(nr.month));
+    });
+    rows.push(nr);
+  });
+  rows.sort(function (a, b) {
+    return String(a.person).localeCompare(String(b.person)) || (a.year - b.year) || (a.month - b.month);
+  });
+  rewriteSheet_(ss, 'furusato_salaries', rows);
 }
 
 function rewriteSheet_(ss, name, rows) {

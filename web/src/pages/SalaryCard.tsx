@@ -16,12 +16,31 @@ type BonusRow = { month: string; months: string; amount: string }
 const num = (s: string) => (s.trim() === '' ? null : Number(s.replace(/[,，]/g, '')))
 const cell = { padding: '4px 6px', textAlign: 'right' as const, whiteSpace: 'nowrap' as const }
 
+// ふるさと納税の計算への影響を示す色分け
+const C_INCOME = '#38bdf8' // 年収想定に使用
+const C_SOCIAL = '#4ade80' // 社会保険料想定に使用
+
+function CalcBadge({ kind }: { kind: 'income' | 'social' | 'none' }) {
+  const conf =
+    kind === 'income'
+      ? { label: '年収計算', color: C_INCOME }
+      : kind === 'social'
+        ? { label: '社保計算', color: C_SOCIAL }
+        : { label: '記録のみ', color: 'var(--muted)' }
+  return (
+    <span style={{ marginLeft: 6, fontSize: 10, padding: '1px 6px', borderRadius: 8, border: `1px solid ${conf.color}`, color: conf.color }}>
+      {conf.label}
+    </span>
+  )
+}
+
 export default function SalaryCard({ person, year, yearInfo, onReflect }: Props) {
   const { data, mutate, saving } = useStore()
   const [month, setMonth] = useState(1)
   const [form, setForm] = useState(EMPTY_MONTH)
   const [bonusBase, setBonusBase] = useState('')
   const [bonusRows, setBonusRows] = useState<BonusRow[]>([])
+  const [copyTargets, setCopyTargets] = useState<number[]>([])
   const [msg, setMsg] = useState('')
 
   const salaries = useMemo(
@@ -97,6 +116,25 @@ export default function SalaryCard({ person, year, yearInfo, onReflect }: Props)
     setForm(EMPTY_MONTH)
   }
 
+  /** いま入力中の値を選択した月へまるごとコピー（一括保存） */
+  const copyToMonths = async () => {
+    if (copyTargets.length === 0) return
+    setMsg('')
+    const values = {
+      gross: num(form.gross),
+      health: num(form.health),
+      pension_ins: num(form.pension_ins),
+      employment: num(form.employment),
+      income_tax: num(form.income_tax),
+      resident_tax: num(form.resident_tax),
+    }
+    await mutate('setFurusatoSalaries', {
+      rows: copyTargets.map((m) => ({ person, year, month: m, ...values })),
+    })
+    setMsg(`${month}月の内容を ${copyTargets.join('・')}月 にコピーしました ✓`)
+    setCopyTargets([])
+  }
+
   const saveBonus = async () => {
     setMsg('')
     // 上限系の保存済み値は維持しつつ、ボーナス列だけ更新
@@ -136,8 +174,13 @@ export default function SalaryCard({ person, year, yearInfo, onReflect }: Props)
             <table style={{ fontSize: 12, borderCollapse: 'collapse', width: '100%' }}>
               <thead>
                 <tr className="muted">
-                  <th style={cell}>月</th><th style={cell}>総支給</th><th style={cell}>ボーナス</th><th style={cell}>健保</th>
-                  <th style={cell}>厚年</th><th style={cell}>雇用</th><th style={cell}>所得税</th><th style={cell}>住民税</th><th style={cell}>控除計</th>
+                  <th style={cell}>月</th>
+                  <th style={{ ...cell, color: C_INCOME }}>総支給</th>
+                  <th style={{ ...cell, color: C_INCOME }}>ボーナス</th>
+                  <th style={{ ...cell, color: C_SOCIAL }}>健保</th>
+                  <th style={{ ...cell, color: C_SOCIAL }}>厚年</th>
+                  <th style={{ ...cell, color: C_SOCIAL }}>雇用</th>
+                  <th style={cell}>所得税</th><th style={cell}>住民税</th><th style={cell}>控除計</th>
                 </tr>
               </thead>
               <tbody>
@@ -167,6 +210,7 @@ export default function SalaryCard({ person, year, yearInfo, onReflect }: Props)
             </table>
           </div>
           <p className="muted" style={{ fontSize: 11, margin: '4px 0 0' }}>
+            <span style={{ color: C_INCOME }}>■年収想定に使用</span>　<span style={{ color: C_SOCIAL }}>■社会保険料想定に使用</span>　■記録のみ（上限計算に影響なし）<br />
             *印は未入力月（入力済み月の平均で想定）。行タップで下のフォームに読み込み。<br />
             社会保険料想定 = 平均月社保×12 + ボーナス合計×社保率（賞与分の概算）
           </p>
@@ -182,21 +226,21 @@ export default function SalaryCard({ person, year, yearInfo, onReflect }: Props)
         ))}
       </div>
       <div className="row2">
-        <label className="field">総支給額
+        <label className="field">総支給額<CalcBadge kind="income" />
           <input type="text" inputMode="numeric" value={form.gross} onChange={(e) => setForm({ ...form, gross: e.target.value })} /></label>
-        <label className="field">健康保険
+        <label className="field">健康保険<CalcBadge kind="social" />
           <input type="text" inputMode="numeric" value={form.health} onChange={(e) => setForm({ ...form, health: e.target.value })} /></label>
       </div>
       <div className="row2">
-        <label className="field">厚生年金保険
+        <label className="field">厚生年金保険<CalcBadge kind="social" />
           <input type="text" inputMode="numeric" value={form.pension_ins} onChange={(e) => setForm({ ...form, pension_ins: e.target.value })} /></label>
-        <label className="field">雇用保険
+        <label className="field">雇用保険<CalcBadge kind="social" />
           <input type="text" inputMode="numeric" value={form.employment} onChange={(e) => setForm({ ...form, employment: e.target.value })} /></label>
       </div>
       <div className="row2">
-        <label className="field">所得税
+        <label className="field">所得税<CalcBadge kind="none" />
           <input type="text" inputMode="numeric" value={form.income_tax} onChange={(e) => setForm({ ...form, income_tax: e.target.value })} /></label>
-        <label className="field">住民税
+        <label className="field">住民税<CalcBadge kind="none" />
           <input type="text" inputMode="numeric" value={form.resident_tax} onChange={(e) => setForm({ ...form, resident_tax: e.target.value })} /></label>
       </div>
       <div className="kv"><span className="muted">控除合計（自動計算）</span><b>{formDeduction !== null ? yen(formDeduction) : '−'}</b></div>
@@ -204,6 +248,19 @@ export default function SalaryCard({ person, year, yearInfo, onReflect }: Props)
       {salaries.some((s) => Number(s.month) === month) && (
         <button className="btn danger" style={{ marginTop: 8 }} onClick={() => void clearMonth()}>この月の記録を削除</button>
       )}
+
+      <h2 style={{ marginTop: 14 }}>いまの入力内容を他の月へコピー</h2>
+      <div className="seg" style={{ flexWrap: 'wrap' }}>
+        {Array.from({ length: 12 }, (_, i) => i + 1).filter((m) => m !== month).map((m) => (
+          <button key={m} className={copyTargets.includes(m) ? 'on' : ''} style={{ flex: '1 0 14%' }}
+            onClick={() => setCopyTargets(copyTargets.includes(m) ? copyTargets.filter((x) => x !== m) : [...copyTargets, m].sort((a, b) => a - b))}>
+            {m}
+          </button>
+        ))}
+      </div>
+      <button className="btn secondary" onClick={() => void copyToMonths()} disabled={saving || copyTargets.length === 0}>
+        {saving ? '保存中…' : copyTargets.length ? `${month}月の内容を ${copyTargets.join('・')}月 へコピー` : 'コピー先の月を選択してください'}
+      </button>
 
       <h2 style={{ marginTop: 14 }}>ボーナス設定（{year}年）</h2>
       <label className="field">基準月額（例: 基本給。未入力なら平均総支給で代用）

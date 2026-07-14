@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard'
 import Assets from './pages/Assets'
 import Cashflow from './pages/Cashflow'
 import FixedCosts from './pages/FixedCosts'
+import Furusato from './pages/Furusato'
 import Settings from './pages/Settings'
 
 const TABS = [
@@ -11,6 +12,7 @@ const TABS = [
   { id: 'assets', label: '資産', icon: '📈' },
   { id: 'cashflow', label: '収支', icon: '💰' },
   { id: 'fixed', label: '固定費', icon: '📋' },
+  { id: 'furusato', label: 'ふるさと', icon: '🎁' },
   { id: 'settings', label: '設定', icon: '⚙️' },
 ] as const
 
@@ -53,6 +55,7 @@ export default function App() {
         {tab === 'assets' && <Assets prefill={route.params} />}
         {tab === 'cashflow' && <Cashflow />}
         {tab === 'fixed' && <FixedCosts />}
+        {tab === 'furusato' && <Furusato prefill={route.params} />}
         {tab === 'settings' && <Settings />}
         {config && !data && loading && <p className="muted center">読み込み中…</p>}
       </main>

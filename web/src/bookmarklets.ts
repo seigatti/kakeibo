@@ -27,6 +27,24 @@ if(!w)location.href=u;
   return 'javascript:' + encodeURIComponent(code.replace(/\n/g, ''))
 }
 
+export function rakutenBookmarklet(appUrl: string): string {
+  // 楽天の商品ページから 商品名・寄付金額・自治体・URL を読み取り、ふるさと納税タブへプリフィル（保存はしない）
+  const code = `(()=>{
+var name=document.title.replace(/【楽天市場】/g,'').replace(/【ふるさと納税】/g,'').split('：')[0].trim().slice(0,120);
+var price='';
+var pe=document.querySelector('[itemprop=price]');
+if(pe)price=(pe.getAttribute('content')||pe.textContent||'').replace(/[^0-9]/g,'');
+if(!price){var m=document.body.innerText.match(/([0-9][0-9,]{2,})\\s*円/);if(m)price=m[1].replace(/,/g,'');}
+var mu='';
+var mm=document.body.innerText.match(/(北海道|東京都|(?:京都|大阪)府|[一-龠々]{2,3}県)\\s*[一-龠々ぁ-んァ-ヶ]{1,8}?[市町村区]/);
+if(mm)mu=mm[0].replace(/\\s+/g,'');
+var u='${appUrl}#furusato?name='+encodeURIComponent(name)+'&price='+price+'&municipality='+encodeURIComponent(mu)+'&url='+encodeURIComponent(location.origin+location.pathname);
+var w=window.open(u,'_blank');
+if(!w)location.href=u;
+})()`
+  return 'javascript:' + encodeURIComponent(code.replace(/\n/g, ''))
+}
+
 export function zaimBookmarklet(appUrl: string): string {
   const code = `(()=>{
 var t=document.body.innerText;

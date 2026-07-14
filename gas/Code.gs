@@ -17,6 +17,8 @@ var SHEET_DEFS = {
   fixed_costs: ['id', 'name', 'amount', 'frequency', 'start_month', 'end_month', 'memo'],
   income: ['month', 'salary', 'other', 'memo'],
   zaim_net: ['month', 'amount'],
+  furusato_items: ['id', 'person', 'year', 'name', 'price', 'municipality', 'url', 'application_status', 'application_method', 'receipt_status', 'memo'],
+  furusato_years: ['person', 'year', 'income', 'social_insurance', 'medical_deduction', 'limit_manual', 'memo'],
   settings: ['key', 'value'],
 };
 
@@ -124,6 +126,16 @@ function handleAction_(body) {
       return getAllData_();
     case 'setSetting':
       upsertRow_('settings', 'key', body.row);
+      return getAllData_();
+    case 'saveFurusatoItem':
+      if (!body.row.id) body.row.id = String(new Date().getTime());
+      upsertRow_('furusato_items', 'id', body.row);
+      return getAllData_();
+    case 'deleteFurusatoItem':
+      deleteRows_('furusato_items', function (r) { return String(r.id) === String(body.id); });
+      return getAllData_();
+    case 'setFurusatoYear':
+      upsertRow_('furusato_years', ['person', 'year'], body.row);
       return getAllData_();
     case 'bulkImport':
       return bulkImport_(body);

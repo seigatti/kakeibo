@@ -54,6 +54,44 @@ export function incomeByMonth(income: IncomeRow[]): Map<string, number> {
   return map
 }
 
+/**
+ * ふるさと納税の年間上限額（簡易計算・目安）
+ * 総務省の標準式: 上限 = 住民税所得割 × 20% ÷ (90% − 所得税率 × 1.021) + 2000円
+ * 給与収入のみ・独身/共働き（配偶者控除なし）を想定した概算。千円未満切り捨て。
+ */
+export function furusatoLimit(income: number | null, socialInsurance: number | null, medicalDeduction: number | null): number | null {
+  if (!income || income <= 0) return null
+  const social = socialInsurance ?? 0
+  const medical = medicalDeduction ?? 0
+
+  // 給与所得控除（令和2年〜）
+  let salaryDeduction: number
+  if (income <= 1_625_000) salaryDeduction = 550_000
+  else if (income <= 1_800_000) salaryDeduction = income * 0.4 - 100_000
+  else if (income <= 3_600_000) salaryDeduction = income * 0.3 + 80_000
+  else if (income <= 6_600_000) salaryDeduction = income * 0.2 + 440_000
+  else if (income <= 8_500_000) salaryDeduction = income * 0.1 + 1_100_000
+  else salaryDeduction = 1_950_000
+
+  const shotoku = income - salaryDeduction
+  const taxableResident = Math.max(0, shotoku - social - medical - 430_000) // 住民税: 基礎控除43万
+  const taxableIncomeTax = Math.max(0, shotoku - social - medical - 480_000) // 所得税: 基礎控除48万
+
+  // 所得税率（復興特別所得税は式内の1.021で考慮）
+  let rate: number
+  if (taxableIncomeTax <= 1_950_000) rate = 0.05
+  else if (taxableIncomeTax <= 3_300_000) rate = 0.1
+  else if (taxableIncomeTax <= 6_950_000) rate = 0.2
+  else if (taxableIncomeTax <= 9_000_000) rate = 0.23
+  else if (taxableIncomeTax <= 18_000_000) rate = 0.33
+  else if (taxableIncomeTax <= 40_000_000) rate = 0.4
+  else rate = 0.45
+
+  const residentTax = taxableResident * 0.1
+  const limit = (residentTax * 0.2) / (0.9 - rate * 1.021) + 2000
+  return Math.floor(limit / 1000) * 1000
+}
+
 /** 記録のある月の全体範囲 */
 export function dataMonthRange(expenses: ExpenseRow[], income: IncomeRow[]): string[] {
   const months = [...expenses.map((e) => e.month), ...income.map((i) => i.month)]

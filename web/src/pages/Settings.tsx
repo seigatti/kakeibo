@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { fetchAll } from '../api'
-import { appBaseUrl, mfBookmarklet, zaimBookmarklet } from '../bookmarklets'
+import { appBaseUrl, mfBookmarklet, rakutenBookmarklet, zaimBookmarklet } from '../bookmarklets'
 import { useStore } from '../store'
 import type { AllData } from '../types'
 
@@ -79,6 +79,14 @@ export default function Settings() {
         <button className="btn secondary small" style={{ marginTop: 6 }} onClick={() => void copy('zaim', zaimBookmarklet(base))}>
           {copied === 'zaim' ? 'コピーしました ✓' : 'コピー'}
         </button>
+        <p style={{ fontSize: 13, margin: '12px 0 4px' }}>🎁 楽天ふるさと納税用（商品名・金額・自治体・URL）</p>
+        <code className="wrap">{rakutenBookmarklet(base)}</code>
+        <button className="btn secondary small" style={{ marginTop: 6 }} onClick={() => void copy('rakuten', rakutenBookmarklet(base))}>
+          {copied === 'rakuten' ? 'コピーしました ✓' : 'コピー'}
+        </button>
+        <p className="muted" style={{ fontSize: 12 }}>
+          楽天の商品ページを開いた状態でクリックすると、ふるさとタブに商品情報が入力された状態で開きます（自動保存はされないので内容を確認して追加）。
+        </p>
         <p className="muted" style={{ fontSize: 12 }}>
           ※ページの作りが変わると自動検出できなくなることがあります。その場合は金額の貼り付けを求められます。
         </p>
@@ -103,13 +111,16 @@ export default function Settings() {
 
       <div className="card">
         <h2>CSVエクスポート</h2>
-        {(['assets', 'expenses', 'fixed_costs', 'income', 'zaim_net'] as (keyof AllData)[]).map((name) => (
-          <button key={name} className="btn secondary" style={{ marginBottom: 8 }}
-            disabled={!data || data[name].length === 0}
-            onClick={() => data && downloadCsv(name, data[name] as unknown as Record<string, unknown>[])}>
-            {name}.csv をダウンロード{data ? `（${data[name].length}件）` : ''}
-          </button>
-        ))}
+        {(['assets', 'expenses', 'fixed_costs', 'income', 'zaim_net', 'furusato_items', 'furusato_years'] as (keyof AllData)[]).map((name) => {
+          const rows = (data?.[name] ?? []) as unknown as Record<string, unknown>[]
+          return (
+            <button key={name} className="btn secondary" style={{ marginBottom: 8 }}
+              disabled={rows.length === 0}
+              onClick={() => downloadCsv(name, rows)}>
+              {name}.csv をダウンロード（{rows.length}件）
+            </button>
+          )
+        })}
       </div>
     </>
   )

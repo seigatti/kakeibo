@@ -42,7 +42,12 @@ export interface SettingRow {
   value: string
 }
 
-export type FurusatoPerson = 'せ' | 'あ'
+export type FurusatoPerson = string // 管理者名（settings の furusato_persons で管理、既定は「せ,あ」）
+
+export const DEFAULT_PERSONS = ['せ', 'あ']
+
+/** ボーナス設定: 月番号(1-12の文字列) → か月分/金額（金額があれば優先） */
+export type BonusConfig = Record<string, { months?: number | null; amount?: number | null }>
 
 export interface FurusatoItem {
   id: string
@@ -66,6 +71,20 @@ export interface FurusatoYear {
   medical_deduction: number | null
   limit_manual: number | null // 手動上限（入力があれば計算値より優先）
   memo: string | null
+  bonus_base: number | null // ボーナス基準月額
+  bonus_config: string | null // BonusConfig の JSON文字列
+}
+
+export interface FurusatoSalary {
+  person: FurusatoPerson
+  year: number
+  month: number // 1-12
+  gross: number | null // 総支給額
+  health: number | null // 健康保険
+  pension_ins: number | null // 厚生年金保険
+  employment: number | null // 雇用保険
+  income_tax: number | null // 所得税
+  resident_tax: number | null // 住民税
 }
 
 export const APPLICATION_STATUSES = ['未購入', '購入済み、書類未', 'ワンストップ未', '手続き済、税額確認未', '完了'] as const
@@ -80,6 +99,7 @@ export interface AllData {
   // 古いGASデプロイでは返ってこないため optional（フロントは ?? [] で扱う）
   furusato_items?: FurusatoItem[]
   furusato_years?: FurusatoYear[]
+  furusato_salaries?: FurusatoSalary[]
   settings: SettingRow[]
 }
 

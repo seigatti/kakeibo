@@ -1,4 +1,4 @@
-import type { AssetRow, ExpenseRow, FixedCostRow, IncomeRow } from './types'
+import type { AssetRow, BonusConfig, ExpenseRow, FixedCostRow, FurusatoSalary, IncomeRow } from './types'
 
 export const yen = (v: number | null | undefined) =>
   v === null || v === undefined ? '−' : `${Math.round(v).toLocaleString('ja-JP')}円`
@@ -90,6 +90,90 @@ export function furusatoLimit(income: number | null, socialInsurance: number | n
   const residentTax = taxableResident * 0.1
   const limit = (residentTax * 0.2) / (0.9 - rate * 1.021) + 2000
   return Math.floor(limit / 1000) * 1000
+}
+
+export interface SalaryEstimate {
+  /** 月別の基準給与（1-12。未入力月は平均で補完） */
+  monthlyGross: Array<{ month: number; gross: number; entered: boolean }>
+  /** 月別のボーナス加算額（該当月のみ） */
+  monthlyBonus: Array<{ month: number; amount: number; months: number | null; manual: boolean }>
+  annualIncome: number // 年収想定 = 基準給与12ヶ月分 + ボーナス合計
+  annualSocial: number // 社会保険料想定
+  bonusTotal: number
+  avgGross: number
+  enteredMonths: number
+  usedAvgAsBonusBase: boolean // 基準月額未入力で平均総支給を代用した
+}
+
+export function parseBonusConfig(json: string | null | undefined): BonusConfig {
+  if (!json) return {}
+  try {
+    const v = JSON.parse(json) as BonusConfig
+    return typeof v === 'object' && v !== null ? v : {}
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * 月次給与から年収・社会保険料を推定する。
+ * - 未入力月は「入力済み月と同様の収入」と想定（平均で補完）
+ * - ボーナス = 手動金額（優先） or 基準月額×か月分（基準未入力なら平均総支給で代用）
+ * - 社会保険料想定 = 平均月社保×12 + ボーナス合計×(平均月社保÷平均月総支給)（賞与分の概算）
+ */
+export function estimateSalary(entries: FurusatoSalary[], bonusBase: number | null, bonusConfig: BonusConfig): SalaryEstimate | null {
+  const withGross = entries.filter((e) => e.gross !== null && e.gross > 0)
+  if (withGross.length === 0) return null
+  const avgGross = withGross.reduce((s, e) => s + (e.gross ?? 0), 0) / withGross.length
+
+  const monthlyGross = Array.from({ length: 12 }, (_, i) => {
+    const hit = withGross.find((e) => Number(e.month) === i + 1)
+    return { month: i + 1, gross: hit?.gross ?? avgGross, entered: !!hit }
+  })
+
+  let usedAvgAsBonusBase = false
+  const monthlyBonus: SalaryEstimate['monthlyBonus'] = []
+  for (const [m, cfg] of Object.entries(bonusConfig)) {
+    const month = Number(m)
+    if (!(month >= 1 && month <= 12) || !cfg) continue
+    if (cfg.amount) {
+      monthlyBonus.push({ month, amount: cfg.amount, months: cfg.months ?? null, manual: true })
+    } else if (cfg.months) {
+      const base = bonusBase ?? avgGross
+      if (bonusBase === null || bonusBase === undefined) usedAvgAsBonusBase = true
+      monthlyBonus.push({ month, amount: base * cfg.months, months: cfg.months, manual: false })
+    }
+  }
+  monthlyBonus.sort((a, b) => a.month - b.month)
+
+  const bonusTotal = monthlyBonus.reduce((s, b) => s + b.amount, 0)
+  const annualIncome = monthlyGross.reduce((s, g) => s + g.gross, 0) + bonusTotal
+
+  const socialOf = (e: FurusatoSalary) => (e.health ?? 0) + (e.pension_ins ?? 0) + (e.employment ?? 0)
+  const withSocial = entries.filter((e) => socialOf(e) > 0)
+  let annualSocial = 0
+  if (withSocial.length > 0) {
+    const avgSocial = withSocial.reduce((s, e) => s + socialOf(e), 0) / withSocial.length
+    annualSocial = avgSocial * 12 + (avgGross > 0 ? bonusTotal * (avgSocial / avgGross) : 0)
+  }
+
+  return {
+    monthlyGross,
+    monthlyBonus,
+    annualIncome: Math.round(annualIncome),
+    annualSocial: Math.round(annualSocial),
+    bonusTotal: Math.round(bonusTotal),
+    avgGross: Math.round(avgGross),
+    enteredMonths: withGross.length,
+    usedAvgAsBonusBase,
+  }
+}
+
+/** 控除合計（=健保+厚年+雇用+所得税+住民税）。全項目未入力なら null */
+export function deductionTotal(e: Partial<FurusatoSalary>): number | null {
+  const vals = [e.health, e.pension_ins, e.employment, e.income_tax, e.resident_tax]
+  if (vals.every((v) => v === null || v === undefined)) return null
+  return vals.reduce<number>((s, v) => s + (v ?? 0), 0)
 }
 
 /** 記録のある月の全体範囲 */

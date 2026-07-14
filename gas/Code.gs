@@ -18,7 +18,9 @@ var SHEET_DEFS = {
   income: ['month', 'salary', 'other', 'memo'],
   zaim_net: ['month', 'amount'],
   furusato_items: ['id', 'person', 'year', 'name', 'price', 'municipality', 'url', 'application_status', 'application_method', 'receipt_status', 'memo'],
-  furusato_years: ['person', 'year', 'income', 'social_insurance', 'medical_deduction', 'limit_manual', 'memo'],
+  // 注: 新列は必ず末尾に追加する（既存シートのデータ列とズレるため）
+  furusato_years: ['person', 'year', 'income', 'social_insurance', 'medical_deduction', 'limit_manual', 'memo', 'bonus_base', 'bonus_config'],
+  furusato_salaries: ['person', 'year', 'month', 'gross', 'health', 'pension_ins', 'employment', 'income_tax', 'resident_tax'],
   settings: ['key', 'value'],
 };
 
@@ -136,6 +138,28 @@ function handleAction_(body) {
       return getAllData_();
     case 'setFurusatoYear':
       upsertRow_('furusato_years', ['person', 'year'], body.row);
+      return getAllData_();
+    case 'setFurusatoSalary':
+      upsertRow_('furusato_salaries', ['person', 'year', 'month'], body.row);
+      return getAllData_();
+    case 'deleteFurusatoSalary':
+      deleteRows_('furusato_salaries', function (r) {
+        return r.person === body.person && String(r.year) === String(body.year) && String(r.month) === String(body.month);
+      });
+      return getAllData_();
+    case 'renameFurusatoPerson': // 管理者名の変更（全ふるさと関連シートを一括書き換え）
+      ['furusato_items', 'furusato_years', 'furusato_salaries'].forEach(function (name) {
+        var ss = ss_();
+        var rows = readSheet_(ss, name);
+        var changed = false;
+        rows.forEach(function (r) {
+          if (r.person === body.from) {
+            r.person = body.to;
+            changed = true;
+          }
+        });
+        if (changed) rewriteSheet_(ss, name, rows);
+      });
       return getAllData_();
     case 'bulkImport':
       return bulkImport_(body);

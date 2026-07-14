@@ -119,13 +119,38 @@ def read_years_a(ws):
     return rows
 
 
+def read_salaries_se(ws):
+    """ふ納税_せ: 月収1〜12月（列13〜24）→ furusato_salaries.gross（健保等の内訳はExcelに無いため空）"""
+    rows = []
+    for r in range(4, 20):
+        year = year_of(ws.cell(row=r, column=5).value)
+        if not year:
+            continue
+        for month in range(1, 13):
+            gross = num(ws.cell(row=r, column=12 + month).value)
+            if gross:
+                rows.append({
+                    "person": "せ",
+                    "year": year,
+                    "month": month,
+                    "gross": gross,
+                    "health": None,
+                    "pension_ins": None,
+                    "employment": None,
+                    "income_tax": None,
+                    "resident_tax": None,
+                })
+    return rows
+
+
 def build_payload():
     wb = openpyxl.load_workbook(XLSX, data_only=True)
     ws_se = wb["ふ納税_せ"]
     ws_a = wb["ふ納税_あ"]
     items = read_items(ws_se, "せ", 19, (1, 2, 4, 5, 6, 7, 8, 9)) + read_items(ws_a, "あ", 2, (1, 2, 3, 4, 5, 6, 7, 8))
     years = read_years_se(ws_se) + read_years_a(ws_a)
-    return {"action": "bulkImport", "mode": "replace", "furusato_items": items, "furusato_years": years}
+    salaries = read_salaries_se(ws_se)
+    return {"action": "bulkImport", "mode": "replace", "furusato_items": items, "furusato_years": years, "furusato_salaries": salaries}
 
 
 def main():
@@ -148,6 +173,12 @@ def main():
                 total[i["year"]] = total.get(i["year"], 0) + i["price"]
         print(f"[{person}] items: {len(items)}件 / years: {len(years)}件 / 年別購入合計: " +
               ", ".join(f"{y}={int(v):,}円" for y, v in sorted(total.items())))
+    sal = p["furusato_salaries"]
+    by_year = {}
+    for s in sal:
+        by_year[s["year"]] = by_year.get(s["year"], 0) + s["gross"]
+    print(f"salaries(せ): {len(sal)}件 / 年別総支給合計: " +
+          ", ".join(f"{y}={int(v):,}円({sum(1 for s in sal if s['year'] == y)}ヶ月)" for y, v in sorted(by_year.items())))
 
     if args.upload:
         if not args.url or not args.token:

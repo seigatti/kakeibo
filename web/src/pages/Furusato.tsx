@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
-import { APPLICATION_METHODS, APPLICATION_STATUSES, type FurusatoItem, type FurusatoPerson } from '../types'
+import { APPLICATION_METHODS, APPLICATION_STATUSES, DEFAULT_PERSONS, type FurusatoItem, type FurusatoPerson } from '../types'
 import { furusatoLimit, yen } from '../utils'
+import SalaryCard from './SalaryCard'
 
 const EMPTY_ITEM = {
   id: '',
@@ -18,24 +19,69 @@ const EMPTY_ITEM = {
 
 export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
   const { data, mutate, saving } = useStore()
-  const [person, setPerson] = useState<FurusatoPerson>(
-    (localStorage.getItem('kakeibo.furusatoPerson') as FurusatoPerson) || 'せ',
-  )
+  const [personState, setPersonState] = useState<FurusatoPerson>(localStorage.getItem('kakeibo.furusatoPerson') || '')
   const thisYear = new Date().getFullYear()
   const [year, setYear] = useState(thisYear)
   const [form, setForm] = useState(EMPTY_ITEM)
   const [editing, setEditing] = useState(false)
   const [yearForm, setYearForm] = useState({ income: '', social_insurance: '', medical_deduction: '', limit_manual: '' })
   const [msg, setMsg] = useState('')
+  const [limitOpen, setLimitOpen] = useState(false)
+  const [personEdit, setPersonEdit] = useState(false)
+  const [newPerson, setNewPerson] = useState('')
+  const [renames, setRenames] = useState<Record<string, string>>({})
   const appliedPrefill = useRef<string | null>(null)
+
+  // 管理者リスト（settings の furusato_persons、既定は せ,あ）
+  const persons = useMemo(() => {
+    const raw = data?.settings.find((s) => s.key === 'furusato_persons')?.value
+    const list = raw ? raw.split(',').map((s) => s.trim()).filter(Boolean) : DEFAULT_PERSONS
+    return list.length ? list : DEFAULT_PERSONS
+  }, [data])
+  const person = persons.includes(personState) ? personState : persons[0]
 
   const items = useMemo(() => (data?.furusato_items ?? []).filter((i) => i.person === person), [data, person])
   const years = useMemo(() => data?.furusato_years ?? [], [data])
   const yearInfo = years.find((y) => y.person === person && Number(y.year) === year)
 
   const selectPerson = (p: FurusatoPerson) => {
-    setPerson(p)
+    setPersonState(p)
     localStorage.setItem('kakeibo.furusatoPerson', p)
+  }
+
+  const personHasData = (p: string) =>
+    (data?.furusato_items ?? []).some((i) => i.person === p) ||
+    (data?.furusato_years ?? []).some((y) => y.person === p) ||
+    (data?.furusato_salaries ?? []).some((s) => s.person === p)
+
+  const savePersons = async (list: string[]) => {
+    await mutate('setSetting', { row: { key: 'furusato_persons', value: list.join(',') } })
+  }
+
+  const addPerson = async () => {
+    const name = newPerson.trim()
+    if (!name || persons.includes(name)) return
+    await savePersons([...persons, name])
+    setNewPerson('')
+    selectPerson(name)
+  }
+
+  const renamePerson = async (from: string) => {
+    const to = (renames[from] ?? '').trim()
+    if (!to || to === from || persons.includes(to)) return
+    await mutate('renameFurusatoPerson', { from, to }) // 既存データを一括引き継ぎ
+    await savePersons(persons.map((p) => (p === from ? to : p)))
+    setRenames({ ...renames, [from]: '' })
+    if (person === from) selectPerson(to)
+  }
+
+  const deletePerson = async (p: string) => {
+    if (personHasData(p)) {
+      window.alert(`「${p}」には寄付や給与のデータがあるため削除できません。先にデータを削除するか、名前の変更で対応してください。`)
+      return
+    }
+    if (!window.confirm(`管理者「${p}」を削除しますか？`)) return
+    await savePersons(persons.filter((x) => x !== p))
   }
 
   // 年・人の切替で上限フォームへ既存値を反映
@@ -92,6 +138,9 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
         medical_deduction: num(yearForm.medical_deduction),
         limit_manual: num(yearForm.limit_manual),
         memo: yearInfo?.memo ?? null,
+        // ボーナス設定は給与カード側で管理しているため既存値を保全する
+        bonus_base: yearInfo?.bonus_base ?? null,
+        bonus_config: yearInfo?.bonus_config ?? null,
       },
     })
     setMsg(`${year}年の上限情報を保存しました ✓`)
@@ -172,13 +221,37 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
   return (
     <>
       <div className="seg">
-        {(['せ', 'あ'] as FurusatoPerson[]).map((p) => (
+        {persons.map((p) => (
           <button key={p} className={person === p ? 'on' : ''} onClick={() => selectPerson(p)}>{p}</button>
         ))}
+        <button title="管理者を編集" style={{ flex: '0 0 40px' }} className={personEdit ? 'on' : ''} onClick={() => setPersonEdit(!personEdit)}>✎</button>
         <select style={{ flex: 1, marginTop: 0, width: 'auto' }} value={year} onChange={(e) => setYear(Number(e.target.value))}>
           {allYears.map((y) => <option key={y} value={y}>{y}年</option>)}
         </select>
       </div>
+
+      {personEdit && (
+        <div className="card">
+          <h2>管理者の編集</h2>
+          {persons.map((p) => (
+            <div key={p} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+              <span style={{ flex: '0 0 60px' }}>{p}</span>
+              <input type="text" placeholder="新しい名前" style={{ marginTop: 0, flex: 1 }}
+                value={renames[p] ?? ''} onChange={(e) => setRenames({ ...renames, [p]: e.target.value })} />
+              <button className="btn small secondary" disabled={saving || !(renames[p] ?? '').trim()} onClick={() => void renamePerson(p)}>変更</button>
+              <button className="btn danger small" disabled={saving} onClick={() => void deletePerson(p)}>削除</button>
+            </div>
+          ))}
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input type="text" placeholder="追加する名前" style={{ marginTop: 0, flex: 1 }}
+              value={newPerson} onChange={(e) => setNewPerson(e.target.value)} />
+            <button className="btn small" style={{ width: 'auto' }} disabled={saving || !newPerson.trim()} onClick={() => void addPerson()}>追加</button>
+          </div>
+          <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
+            名前を変更すると、その管理者の寄付・上限・給与データもすべて新しい名前に引き継がれます。
+          </p>
+        </div>
+      )}
 
       <div className="card">
         <h2>{year}年の上限額（{person}）</h2>
@@ -188,7 +261,7 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
           <span>追加可能額</span>
           <span className={remaining !== null && remaining < 0 ? 'neg' : 'pos'}>{remaining !== null ? yen(remaining) : '−'}</span>
         </div>
-        <details style={{ marginTop: 8 }}>
+        <details style={{ marginTop: 8 }} open={limitOpen} onToggle={(e) => setLimitOpen((e.target as HTMLDetailsElement).open)}>
           <summary className="muted" style={{ fontSize: 13, cursor: 'pointer' }}>上限の計算・入力（年収・社会保険料など）</summary>
           <div className="row2" style={{ marginTop: 8 }}>
             <label className="field">年収（税込・想定可）
@@ -210,6 +283,22 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
           <button className="btn" onClick={() => void saveYear()} disabled={saving}>{saving ? '保存中…' : '上限情報を保存'}</button>
         </details>
       </div>
+
+      <SalaryCard
+        person={person}
+        year={year}
+        yearInfo={yearInfo}
+        onReflect={(income, social) => {
+          setYearForm({
+            ...yearForm,
+            income: String(income),
+            social_insurance: social !== null ? String(social) : yearForm.social_insurance,
+          })
+          setLimitOpen(true)
+          setMsg('年収想定を上限計算に反映しました。「上限情報を保存」で確定してください')
+          window.scrollTo({ top: 0, behavior: 'smooth' })
+        }}
+      />
 
       <div className="card">
         <h2>{editing ? '寄付を編集' : '寄付・候補を追加'}</h2>

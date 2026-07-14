@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useStore } from './store'
+import MemoWindow from './MemoWindow'
 import Dashboard from './pages/Dashboard'
 import Assets from './pages/Assets'
 import Cashflow from './pages/Cashflow'
@@ -28,6 +29,12 @@ function parseHash(): { tab: TabId; params: URLSearchParams } {
 export default function App() {
   const { config, data, loading, error, refresh } = useStore()
   const [route, setRoute] = useState(parseHash)
+  const [memoOpen, setMemoOpen] = useState(localStorage.getItem('kakeibo.memoOpen') === '1')
+
+  const toggleMemo = (open: boolean) => {
+    setMemoOpen(open)
+    localStorage.setItem('kakeibo.memoOpen', open ? '1' : '0')
+  }
 
   useEffect(() => {
     const onHash = () => setRoute(parseHash())
@@ -42,9 +49,14 @@ export default function App() {
     <div className="app">
       <header className="header">
         <h1>家計簿</h1>
-        <button className="icon-btn" onClick={() => void refresh()} disabled={loading} title="再読み込み">
-          {loading ? '…' : '↻'}
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className={memoOpen ? 'icon-btn on' : 'icon-btn'} onClick={() => toggleMemo(!memoOpen)} title="メモ">
+            📝
+          </button>
+          <button className="icon-btn" onClick={() => void refresh()} disabled={loading} title="再読み込み">
+            {loading ? '…' : '↻'}
+          </button>
+        </div>
       </header>
 
       {error && <div className="banner error">⚠ {error}</div>}
@@ -59,6 +71,8 @@ export default function App() {
         {tab === 'settings' && <Settings />}
         {config && !data && loading && <p className="muted center">読み込み中…</p>}
       </main>
+
+      {memoOpen && <MemoWindow onClose={() => toggleMemo(false)} />}
 
       <nav className="tabbar">
         {TABS.map((t) => (

@@ -21,6 +21,7 @@ var SHEET_DEFS = {
   // 注: 新列は必ず末尾に追加する（既存シートのデータ列とズレるため）
   furusato_years: ['person', 'year', 'income', 'social_insurance', 'medical_deduction', 'limit_manual', 'memo', 'bonus_base', 'bonus_config'],
   furusato_salaries: ['person', 'year', 'month', 'gross', 'health', 'pension_ins', 'employment', 'income_tax', 'resident_tax'],
+  memos: ['id', 'text', 'updated_at'],
   settings: ['key', 'value'],
 };
 
@@ -128,6 +129,14 @@ function handleAction_(body) {
       return getAllData_();
     case 'setSetting':
       upsertRow_('settings', 'key', body.row);
+      return getAllData_();
+    case 'saveMemo':
+      if (!body.row.id) body.row.id = String(new Date().getTime());
+      body.row.updated_at = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
+      upsertRow_('memos', 'id', body.row);
+      return getAllData_();
+    case 'deleteMemo':
+      deleteRows_('memos', function (r) { return String(r.id) === String(body.id); });
       return getAllData_();
     case 'saveFurusatoItem':
       if (!body.row.id) body.row.id = String(new Date().getTime());

@@ -90,6 +90,12 @@ export interface FurusatoSalary {
 export const APPLICATION_STATUSES = ['未購入', '購入済み、書類未', 'ワンストップ未', '手続き済、税額確認未', '完了'] as const
 export const APPLICATION_METHODS = ['自治体マイページ', 'ふるまど（IAM）', '確定申告', '郵送'] as const
 
+export interface MemoRow {
+  id: string
+  text: string
+  updated_at: string | null
+}
+
 export interface AllData {
   assets: AssetRow[]
   expenses: ExpenseRow[]
@@ -100,6 +106,7 @@ export interface AllData {
   furusato_items?: FurusatoItem[]
   furusato_years?: FurusatoYear[]
   furusato_salaries?: FurusatoSalary[]
+  memos?: MemoRow[]
   settings: SettingRow[]
 }
 

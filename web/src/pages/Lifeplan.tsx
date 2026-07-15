@@ -146,7 +146,9 @@ export default function Lifeplan() {
           <p className="pos" style={{ fontSize: 13, margin: '6px 0 0' }}>✓ 80年後まで資産はマイナスになりません</p>
         )}
         <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>
-          実質資産 = インフレ率{cfg.inflation}%で今の価値に換算した額（資産の目減りを可視化）
+          実質資産 = インフレ率{cfg.inflation}%で今の価値に換算した額（資産の目減りを可視化）。<br />
+          毎年の計算: 資産 × (1+運用利回り) + 収入（給与・年金・カスタム） − 支出（基本生活費・子供費用・カスタム、インフレで増加）。
+          名目資産が減らない場合は運用益が収支の赤字を上回っています（運用利回りを0にすると収支だけの推移を確認できます）
         </p>
       </div>
 
@@ -158,19 +160,22 @@ export default function Lifeplan() {
             data={{
               labels,
               datasets: [
-                { type: 'bar' as const, label: '収入', data: result.rows.map((r) => r.income), backgroundColor: '#4ade80' },
-                { type: 'bar' as const, label: '支出', data: result.rows.map((r) => -r.expense), backgroundColor: '#f87171' },
-                { type: 'line' as const, label: 'うち子供費用', data: result.rows.map((r) => -r.childCost), borderColor: '#fbbf24', pointRadius: 0, tension: 0.2 },
+                { type: 'bar' as const, label: '給与', data: result.rows.map((r) => r.salary), backgroundColor: '#4ade80', stack: 'income' },
+                { type: 'bar' as const, label: '年金', data: result.rows.map((r) => r.pension), backgroundColor: '#2dd4bf', stack: 'income' },
+                { type: 'bar' as const, label: '支出', data: result.rows.map((r) => -r.expense), backgroundColor: '#f87171', stack: 'expense' },
+                { type: 'line' as const, label: 'うち子供費用', data: result.rows.map((r) => -r.childCost), borderColor: '#fbbf24', pointRadius: 0, tension: 0.2, stack: 'child' },
               ],
             }}
             options={{
               maintainAspectRatio: false,
               interaction: { mode: 'index', intersect: false },
-              scales: { x: { stacked: true, ticks: tickOpts }, y: { ticks: { callback: (v) => yenShort(Number(v)) } } },
+              scales: { x: { stacked: true, ticks: tickOpts }, y: { stacked: true, ticks: { callback: (v) => yenShort(Number(v)) } } },
             }}
           />
         </div>
-        <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>子供費用の山（教育費のピーク）と退職後の収入減が確認できます</p>
+        <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>
+          退職を境に緑（給与）が消えて青緑（年金）だけになります。支出には基本生活費・子供費用・カスタム支出を含みます
+        </p>
       </div>
 
       <div className="card">
@@ -184,16 +189,21 @@ export default function Lifeplan() {
         <div className="row2">
           <label className="field">昇給率（%/年）
             <input type="text" inputMode="decimal" value={cfg.raise_rate} onChange={(e) => upd({ raise_rate: Number(e.target.value) || 0 })} /></label>
-          <label className="field">基本生活費（年額・子供費用除く）
-            <input type="text" inputMode="numeric" value={cfg.living_cost} onChange={(e) => upd({ living_cost: Number(e.target.value.replace(/[,，]/g, '')) || 0 })} /></label>
+          <label className="field">年金の上昇率（%/年）
+            <input type="text" inputMode="decimal" value={cfg.pension_growth} onChange={(e) => upd({ pension_growth: Number(e.target.value) || 0 })} /></label>
         </div>
         <div className="row2">
+          <label className="field">基本生活費（年額・子供費用除く）
+            <input type="text" inputMode="numeric" value={cfg.living_cost} onChange={(e) => upd({ living_cost: Number(e.target.value.replace(/[,，]/g, '')) || 0 })} /></label>
           <label className="field">子供費用の倍率（標準=1.0）
             <input type="text" inputMode="decimal" value={cfg.child_multiplier} onChange={(e) => upd({ child_multiplier: Number(e.target.value) || 0 })} /></label>
-          <label className="field">開始資産（空欄=最新の記録を採用）
-            <input type="text" inputMode="numeric" placeholder={latestAssets !== null ? `自動: ${amt(latestAssets)}` : ''}
-              value={cfg.start_assets_override ?? ''} onChange={(e) => upd({ start_assets_override: numOrNull(e.target.value) })} /></label>
         </div>
+        <label className="field">開始資産（空欄=最新の記録を採用）
+          <input type="text" inputMode="numeric" placeholder={latestAssets !== null ? `自動: ${amt(latestAssets)}` : ''}
+            value={cfg.start_assets_override ?? ''} onChange={(e) => upd({ start_assets_override: numOrNull(e.target.value) })} /></label>
+        <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>
+          年金の上昇率 0 = 受給額が現在の額のまま増えない想定（保守的）。物価連動を想定するならインフレ率と同じ値を入力。
+        </p>
       </div>
 
       <div className="card">
@@ -333,8 +343,10 @@ export default function Lifeplan() {
                 <th style={{ padding: 4, textAlign: 'left' }}>年</th>
                 {cfg.adults.filter((a) => a.birth_year).map((a) => <th key={a.name} style={{ padding: 4, textAlign: 'right' }}>{a.name}</th>)}
                 {cfg.children.map((_, i) => <th key={`c${i}`} style={{ padding: 4, textAlign: 'right' }}>子{i + 1}</th>)}
-                <th style={{ padding: 4, textAlign: 'right' }}>収入</th>
+                <th style={{ padding: 4, textAlign: 'right' }}>給与</th>
+                <th style={{ padding: 4, textAlign: 'right' }}>年金</th>
                 <th style={{ padding: 4, textAlign: 'right' }}>支出</th>
+                <th style={{ padding: 4, textAlign: 'right' }}>収支</th>
                 <th style={{ padding: 4, textAlign: 'right' }}>名目資産</th>
                 <th style={{ padding: 4, textAlign: 'right' }}>実質資産</th>
               </tr>
@@ -348,8 +360,12 @@ export default function Lifeplan() {
                     const age = r.year - c.birth_year
                     return <td key={`c${i}`} style={{ padding: 4, textAlign: 'right' }}>{age >= 0 ? `${age}歳` : '−'}</td>
                   })}
-                  <td style={{ padding: 4, textAlign: 'right' }}>{yenShort(r.income)}</td>
+                  <td style={{ padding: 4, textAlign: 'right' }}>{yenShort(r.salary)}</td>
+                  <td style={{ padding: 4, textAlign: 'right' }}>{yenShort(r.pension)}</td>
                   <td style={{ padding: 4, textAlign: 'right' }}>{yenShort(r.expense)}</td>
+                  <td style={{ padding: 4, textAlign: 'right' }} className={r.income - r.expense < 0 ? 'neg' : 'pos'}>
+                    {r.income - r.expense >= 0 ? '+' : ''}{yenShort(r.income - r.expense)}
+                  </td>
                   <td style={{ padding: 4, textAlign: 'right' }} className={r.assetsNominal < 0 ? 'neg' : ''}>{yenShort(r.assetsNominal)}</td>
                   <td style={{ padding: 4, textAlign: 'right' }} className={r.assetsReal < 0 ? 'neg' : ''}>{yenShort(r.assetsReal)}</td>
                 </tr>

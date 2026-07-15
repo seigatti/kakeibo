@@ -45,6 +45,7 @@ export interface LifeplanConfig {
   inflation: number // %（実質インフレ率）
   invest_return: number // %（運用利回り）
   raise_rate: number // %（昇給率）
+  pension_growth: number // %（年金の上昇率。0=受給額は現在の額のまま。物価連動にするならインフレ率と同値）
   living_cost: number // 基本生活費（年額・現在価格・子供費用を除く）
   child_multiplier: number // 子供費用の倍率
   start_assets_override: number | null // 開始資産の手動上書き（空なら最新スナップショット）
@@ -57,6 +58,7 @@ export const DEFAULT_LIFEPLAN: LifeplanConfig = {
   inflation: 2.0,
   invest_return: 3.0,
   raise_rate: 1.0,
+  pension_growth: 0,
   living_cost: 3_000_000,
   child_multiplier: 1.0,
   start_assets_override: null,
@@ -136,6 +138,8 @@ export interface LifeplanRow {
   i: number // 経過年
   year: number
   ages: Array<{ name: string; age: number | null }>
+  salary: number // 名目の給与収入
+  pension: number // 名目の年金収入
   income: number // 名目の年収入（給与+年金+カスタム収入）
   living: number // 名目の基本生活費
   childCost: number // 名目の子供費用
@@ -169,6 +173,7 @@ export function simulate(
     const year = startYear + i
     const infl = Math.pow(1 + cfg.inflation / 100, i)
     const raise = Math.pow(1 + cfg.raise_rate / 100, i)
+    const pensionGrow = Math.pow(1 + (cfg.pension_growth ?? 0) / 100, i)
 
     let salary = 0
     let pension = 0
@@ -179,7 +184,7 @@ export function simulate(
       if (age === null) continue
       if (a.income_enabled && age < a.retire_age) salary += (resolvedNet[a.name] ?? 0) * raise
       const pensionAmount = resolvedPension?.[a.name] ?? a.pension ?? 0
-      if (pensionAmount > 0 && age >= a.pension_start) pension += pensionAmount * infl
+      if (pensionAmount > 0 && age >= a.pension_start) pension += pensionAmount * pensionGrow
     }
 
     let childCost = 0
@@ -207,6 +212,8 @@ export function simulate(
 
     rows.push({
       i, year, ages,
+      salary: Math.round(salary),
+      pension: Math.round(pension),
       income: Math.round(income),
       living: Math.round(living),
       childCost: Math.round(childNominal),

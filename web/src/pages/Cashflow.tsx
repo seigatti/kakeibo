@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Bar, Chart, Line } from 'react-chartjs-2'
 import { useStore } from '../store'
 import { DEFAULT_CATEGORIES } from '../types'
-import { addMonths, dataMonthRange, expenseByMonth, fixedMonthlyTotal, incomeByMonth, thisMonth, yen, yenShort } from '../utils'
+import { addMonths, dataMonthRange, effectiveIncomeByMonth, expenseByMonth, fixedMonthlyTotal, netSalaryByMonth, thisMonth, yen, yenShort } from '../utils'
 import CsvImportCard from './CsvImportCard'
 
 const PALETTE = ['#38bdf8', '#4ade80', '#fbbf24', '#f87171', '#c084fc', '#fb923c', '#2dd4bf', '#a3e635']
@@ -62,10 +62,15 @@ export default function Cashflow() {
   }
 
   // ---- グラフ用集計 ----
-  const months = useMemo(() => (data ? dataMonthRange(data.expenses, data.income) : []), [data])
+  // 給料が未入力の月は、ふるさとの給与データの手取り（総支給−控除合計）を収入として扱う
+  const netByMonth = useMemo(() => netSalaryByMonth(data?.furusato_salaries ?? []), [data])
+  const months = useMemo(
+    () => (data ? dataMonthRange(data.expenses, data.income, [...netByMonth.keys()]) : []),
+    [data, netByMonth],
+  )
   const chartMonths = months.slice(-24)
   const expMap = useMemo(() => expenseByMonth(data?.expenses ?? []), [data])
-  const incMap = useMemo(() => incomeByMonth(data?.income ?? []), [data])
+  const incMap = useMemo(() => effectiveIncomeByMonth(data?.income ?? [], data?.furusato_salaries ?? []), [data])
   const fixedOf = (m: string) => fixedMonthlyTotal(data?.fixed_costs ?? [], m)
 
   const catTrend = useMemo(() => {
@@ -90,9 +95,15 @@ export default function Cashflow() {
           </button>
         )}
         <div className="row2">
-          <label className="field">給料（収入）
+          <label className="field">給料（空欄=給与データの手取り）
             <input type="text" inputMode="numeric" value={salary} onChange={(e) => setSalary(e.target.value)}
-              placeholder={prevIncome?.salary ? `前月: ${prevIncome.salary}` : undefined} /></label>
+              placeholder={
+                netByMonth.get(month) !== undefined
+                  ? `手取り: ${netByMonth.get(month)!.toLocaleString()}`
+                  : prevIncome?.salary
+                    ? `前月: ${prevIncome.salary}`
+                    : undefined
+              } /></label>
           <label className="field">その他収入
             <input type="text" inputMode="numeric" value={other} onChange={(e) => setOther(e.target.value)} /></label>
         </div>
@@ -148,7 +159,7 @@ export default function Cashflow() {
               />
             </div>
             <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
-              ※収入は入力した月のみ表示されます（未入力の月は0）
+              ※給料が未入力の月は、ふるさとタブの給与データの手取り（総支給−控除合計）を収入として表示します（手入力が優先。控除が未入力の月は総支給がそのまま使われます）
             </p>
           </div>
 

@@ -45,9 +45,11 @@ export default function Lifeplan() {
   }, [data, cfg, persons])
 
   // 手取り年収の想定（給与データより）: 今年→無ければ直近年
+  // 管理者リストに無い名前（リネーム前の名前など）も cfg 側にあれば対象にする
   const estimatedNet = useMemo(() => {
     const out: Record<string, number | null> = {}
-    for (const p of persons) {
+    const names = [...new Set([...persons, ...(cfg?.adults ?? []).map((a) => a.name)])]
+    for (const p of names) {
       const all = (data?.furusato_salaries ?? []).filter((s) => s.person === p && s.gross)
       const years = [...new Set(all.map((s) => Number(s.year)))].sort((a, b) => b - a)
       const y = years.includes(thisYear) ? thisYear : years[0]
@@ -63,7 +65,7 @@ export default function Lifeplan() {
       )
     }
     return out
-  }, [data, persons])
+  }, [data, persons, cfg])
 
   const latestAssets = useMemo(() => {
     const assets = sortedAssets(data?.assets ?? [])
@@ -186,7 +188,13 @@ export default function Lifeplan() {
         {cfg.adults.map((a, i) => (
           <div key={i} style={{ borderTop: i > 0 ? '1px solid var(--border)' : undefined, paddingTop: i > 0 ? 10 : 0, marginBottom: 10 }}>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
-              <b style={{ flex: 1 }}>{a.name}</b>
+              <select
+                style={{ marginTop: 0, width: 'auto', flex: 1, fontWeight: 700 }}
+                value={a.name}
+                onChange={(e) => updAdult(i, { name: e.target.value })}
+              >
+                {[...new Set([a.name, ...persons])].map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
               <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
                 <input type="checkbox" style={{ width: 'auto', marginTop: 0 }} checked={a.income_enabled}
                   onChange={(e) => updAdult(i, { income_enabled: e.target.checked })} />
@@ -194,6 +202,11 @@ export default function Lifeplan() {
               </label>
               <button className="btn danger small" onClick={() => upd({ adults: cfg.adults.filter((_, j) => j !== i) })}>✕</button>
             </div>
+            {!persons.includes(a.name) && (
+              <p className="neg" style={{ fontSize: 12, margin: '0 0 6px' }}>
+                ⚠「{a.name}」は管理者リストに存在しません（名前変更前のデータ？）。上のセレクトで現在の管理者に変更して保存してください
+              </p>
+            )}
             <div className="row2">
               <label className="field">生年（西暦）
                 <input type="text" inputMode="numeric" placeholder="例: 1995" value={a.birth_year ?? ''} onChange={(e) => updAdult(i, { birth_year: numOrNull(e.target.value) })} /></label>

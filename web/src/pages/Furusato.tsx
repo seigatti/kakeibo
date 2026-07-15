@@ -83,6 +83,19 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
         await mutate('setSetting', { row: { key: 'furusato_profile', value: JSON.stringify({ ...prof, head_person: to }) } })
       }
     }
+    // ライフプランの大人の名前も追随（手取り年収の紐づけが切れないように）
+    const lifeplanRaw = data?.settings.find((s) => s.key === 'lifeplan_config')?.value
+    if (lifeplanRaw) {
+      try {
+        const plan = JSON.parse(lifeplanRaw) as { adults?: Array<{ name: string }> }
+        if (plan.adults?.some((a) => a.name === from)) {
+          plan.adults = plan.adults.map((a) => (a.name === from ? { ...a, name: to } : a))
+          await mutate('setSetting', { row: { key: 'lifeplan_config', value: JSON.stringify(plan) } })
+        }
+      } catch {
+        /* 壊れたJSONは触らない */
+      }
+    }
     setRenames({ ...renames, [from]: '' })
     if (person === from) selectPerson(to)
   }

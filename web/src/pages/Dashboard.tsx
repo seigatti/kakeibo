@@ -1,6 +1,6 @@
 import { Line } from 'react-chartjs-2'
 import { useStore } from '../store'
-import { assetTotal, expenseByMonth, fixedMonthlyTotal, incomeByMonth, sortedAssets, thisMonth, yen, yenShort } from '../utils'
+import { assetTotal, effectiveIncomeByMonth, expenseByMonth, fixedMonthlyTotal, sortedAssets, thisMonth, yen, yenShort } from '../utils'
 
 export default function Dashboard() {
   const { data } = useStore()
@@ -11,7 +11,7 @@ export default function Dashboard() {
   const prev = assets[assets.length - 2]
   const month = thisMonth()
 
-  const income = incomeByMonth(data.income).get(month) ?? 0
+  const income = effectiveIncomeByMonth(data.income, data.furusato_salaries ?? []).get(month) ?? 0
   const variable = expenseByMonth(data.expenses).get(month) ?? 0
   const fixed = fixedMonthlyTotal(data.fixed_costs, month)
   const balance = income - variable - fixed

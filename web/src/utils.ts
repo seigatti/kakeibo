@@ -54,6 +54,34 @@ export function incomeByMonth(income: IncomeRow[]): Map<string, number> {
   return map
 }
 
+/** ふるさとの月次給与から月ごとの世帯手取り（総支給−控除合計。全員分合算） */
+export function netSalaryByMonth(salaries: FurusatoSalary[]): Map<string, number> {
+  const map = new Map<string, number>()
+  for (const s of salaries) {
+    if (!s.gross || s.gross <= 0) continue
+    const key = `${s.year}-${String(s.month).padStart(2, '0')}`
+    const net = s.gross - (deductionTotal(s) ?? 0)
+    map.set(key, (map.get(key) ?? 0) + net)
+  }
+  return map
+}
+
+/**
+ * 月ごとの実効収入。給料は手入力（income.salary）を優先し、
+ * 未入力の月は ふるさとの給与データの手取りを自動採用する。その他収入は常に加算。
+ */
+export function effectiveIncomeByMonth(income: IncomeRow[], salaries: FurusatoSalary[]): Map<string, number> {
+  const net = netSalaryByMonth(salaries)
+  const map = new Map<string, number>()
+  const months = new Set([...income.map((i) => i.month), ...net.keys()])
+  for (const m of months) {
+    const row = income.find((i) => i.month === m)
+    const salary = row?.salary ?? net.get(m) ?? 0
+    map.set(m, salary + (row?.other ?? 0))
+  }
+  return map
+}
+
 // ================================================================ ふるさと納税 上限計算
 
 /** 給与所得控除（令和2年〜） */
@@ -287,8 +315,8 @@ export function deductionTotal(e: Partial<FurusatoSalary>): number | null {
 }
 
 /** 記録のある月の全体範囲 */
-export function dataMonthRange(expenses: ExpenseRow[], income: IncomeRow[]): string[] {
-  const months = [...expenses.map((e) => e.month), ...income.map((i) => i.month)]
+export function dataMonthRange(expenses: ExpenseRow[], income: IncomeRow[], extraMonths: string[] = []): string[] {
+  const months = [...expenses.map((e) => e.month), ...income.map((i) => i.month), ...extraMonths]
   if (months.length === 0) return []
   months.sort()
   return monthRange(months[0], months[months.length - 1])

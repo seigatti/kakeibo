@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { APPLICATION_METHODS, APPLICATION_STATUSES, DEFAULT_PERSONS, type FurusatoItem, type FurusatoPerson } from '../types'
-import { estimateSalary, furusatoLimitDetailed, parseBonusConfig, parseProfile, yen } from '../utils'
+import { amt, estimateSalary, furusatoLimitDetailed, parseBonusConfig, parseProfile, yen } from '../utils'
 import ProfileCard from './ProfileCard'
 import SalaryCard from './SalaryCard'
 
@@ -329,7 +329,7 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
               <input type="text" inputMode="numeric" value={yearForm.income} onChange={(e) => setYearForm({ ...yearForm, income: e.target.value })} /></label>
             <label className="field">社会保険料（年額・空欄なら想定値を採用）
               <input type="text" inputMode="numeric"
-                placeholder={socialEstimated !== null ? `想定: ${socialEstimated.toLocaleString()}` : ''}
+                placeholder={socialEstimated !== null ? `想定: ${amt(socialEstimated)}` : ''}
                 value={yearForm.social_insurance} onChange={(e) => setYearForm({ ...yearForm, social_insurance: e.target.value })} /></label>
           </div>
           <div className="row2">
@@ -343,11 +343,11 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
               <input type="text" inputMode="numeric" value={yearForm.medical_paid} onChange={(e) => setYearForm({ ...yearForm, medical_paid: e.target.value })} /></label>
             <label className="field">医療費控除額の直接指定（任意・優先）
               <input type="text" inputMode="numeric"
-                placeholder={detailed && num(yearForm.medical_paid) ? `自動計算: ${Math.round(detailed.breakdown.medical).toLocaleString()}` : ''}
+                placeholder={detailed && num(yearForm.medical_paid) ? `自動計算: ${amt(Math.round(detailed.breakdown.medical))}` : ''}
                 value={yearForm.medical_deduction} onChange={(e) => setYearForm({ ...yearForm, medical_deduction: e.target.value })} /></label>
           </div>
           <label className="field">上限の手動指定（最優先）
-            <input type="text" inputMode="numeric" placeholder={limitAuto ? `計算値: ${limitAuto.toLocaleString()}` : ''} value={yearForm.limit_manual} onChange={(e) => setYearForm({ ...yearForm, limit_manual: e.target.value })} /></label>
+            <input type="text" inputMode="numeric" placeholder={limitAuto ? `計算値: ${amt(limitAuto)}` : ''} value={yearForm.limit_manual} onChange={(e) => setYearForm({ ...yearForm, limit_manual: e.target.value })} /></label>
           <p className="muted" style={{ fontSize: 12 }}>
             計算上限（目安）: <b>{limitAuto !== null ? yen(limitAuto) : '年収を入力してください'}</b><br />
             {usingEstimatedSocial && (

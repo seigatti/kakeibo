@@ -100,15 +100,36 @@ export function childAnnualCost(age: number, c: LifeplanChild): number {
   return 0
 }
 
-/** 給与データから手取り年収を想定（手取り月平均×12 + ボーナス×手取り率） */
-export function estimateNetIncome(entries: FurusatoSalary[], bonusBase: number | null, bonusConfig: BonusConfig): number | null {
+/** 給与データから年収を想定。net=手取り（手取り月平均×12 + ボーナス×手取り率）、gross=額面 */
+export function estimateIncome(
+  entries: FurusatoSalary[],
+  bonusBase: number | null,
+  bonusConfig: BonusConfig,
+): { net: number; gross: number } | null {
   const est: SalaryEstimate | null = estimateSalary(entries, bonusBase, bonusConfig)
   if (!est) return null
   const withGross = entries.filter((e) => e.gross !== null && e.gross > 0)
   const nets = withGross.map((e) => (e.gross ?? 0) - (deductionTotal(e) ?? 0))
   const netAvg = nets.reduce((s, v) => s + v, 0) / nets.length
   const annualNet = netAvg * 12 + est.bonusTotal * (est.avgGross > 0 ? netAvg / est.avgGross : 1)
-  return Math.round(annualNet)
+  return { net: Math.round(annualNet), gross: est.annualIncome }
+}
+
+/** 旧シグネチャ互換 */
+export function estimateNetIncome(entries: FurusatoSalary[], bonusBase: number | null, bonusConfig: BonusConfig): number | null {
+  return estimateIncome(entries, bonusBase, bonusConfig)?.net ?? null
+}
+
+/**
+ * 年金の年額を想定（簡易式）:
+ * 老齢基礎年金 816,000円 × min(加入年数,40)/40 + 老齢厚生年金 ≒ 平均年収(額面) × 0.5481% × 加入年数
+ * 加入年数 = min(退職年齢, 65) − 22
+ */
+export function estimatePension(grossAnnual: number | null, retireAge: number): number {
+  const years = Math.max(0, Math.min(retireAge, 65) - 22)
+  const basic = 816_000 * (Math.min(years, 40) / 40)
+  const kosei = (grossAnnual ?? 0) * 0.005481 * years
+  return Math.round(basic + kosei)
 }
 
 export interface LifeplanRow {
@@ -131,12 +152,14 @@ export interface LifeplanResult {
 
 /**
  * @param resolvedNet 大人ごとの採用手取り年収（手動 or 給与データからの想定を呼び出し側で解決済み）
+ * @param resolvedPension 大人ごとの採用年金額（手動 or 想定。省略時は cfg の手入力値のみ使用）
  */
 export function simulate(
   cfg: LifeplanConfig,
   startAssets: number,
   startYear: number,
   resolvedNet: Record<string, number>,
+  resolvedPension?: Record<string, number>,
 ): LifeplanResult {
   const rows: LifeplanRow[] = []
   let assets = startAssets
@@ -155,7 +178,8 @@ export function simulate(
       ages.push({ name: a.name, age })
       if (age === null) continue
       if (a.income_enabled && age < a.retire_age) salary += (resolvedNet[a.name] ?? 0) * raise
-      if (a.pension && age >= a.pension_start) pension += a.pension * infl
+      const pensionAmount = resolvedPension?.[a.name] ?? a.pension ?? 0
+      if (pensionAmount > 0 && age >= a.pension_start) pension += pensionAmount * infl
     }
 
     let childCost = 0

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Bar, Chart, Line } from 'react-chartjs-2'
 import { useStore } from '../store'
 import { DEFAULT_CATEGORIES } from '../types'
-import { addMonths, dataMonthRange, effectiveIncomeByMonth, expenseByMonth, fixedMonthlyTotal, netSalaryByMonth, thisMonth, yen, yenShort } from '../utils'
+import { addMonths, amt, dataMonthRange, effectiveIncomeByMonth, expenseByMonth, fixedMonthlyTotal, netSalaryByMonth, thisMonth, yen, yenShort } from '../utils'
 import CsvImportCard from './CsvImportCard'
 
 const PALETTE = ['#38bdf8', '#4ade80', '#fbbf24', '#f87171', '#c084fc', '#fb923c', '#2dd4bf', '#a3e635']
@@ -99,9 +99,9 @@ export default function Cashflow() {
             <input type="text" inputMode="numeric" value={salary} onChange={(e) => setSalary(e.target.value)}
               placeholder={
                 netByMonth.get(month) !== undefined
-                  ? `手取り: ${netByMonth.get(month)!.toLocaleString()}`
+                  ? `手取り: ${amt(netByMonth.get(month)!)}`
                   : prevIncome?.salary
-                    ? `前月: ${prevIncome.salary}`
+                    ? `前月: ${amt(prevIncome.salary)}`
                     : undefined
               } /></label>
           <label className="field">その他収入

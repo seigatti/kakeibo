@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Chart, Line } from 'react-chartjs-2'
 import {
   childAnnualCost,
-  estimateNetIncome,
+  estimateIncome,
+  estimatePension,
   parseLifeplan,
   simulate,
   type LifeplanAdult,
@@ -11,7 +12,7 @@ import {
 } from '../lifeplan'
 import { useStore } from '../store'
 import { DEFAULT_PERSONS } from '../types'
-import { assetTotal, parseBonusConfig, sortedAssets, yen, yenShort } from '../utils'
+import { amt, assetTotal, parseBonusConfig, sortedAssets, yen, yenShort } from '../utils'
 
 const thisYear = new Date().getFullYear()
 
@@ -44,10 +45,10 @@ export default function Lifeplan() {
     setCfg(saved.adults.length ? saved : { ...saved, adults: persons.map(NEW_ADULT) })
   }, [data, cfg, persons])
 
-  // 手取り年収の想定（給与データより）: 今年→無ければ直近年
+  // 年収の想定（給与データより・手取り/額面）: 今年→無ければ直近年
   // 管理者リストに無い名前（リネーム前の名前など）も cfg 側にあれば対象にする
-  const estimatedNet = useMemo(() => {
-    const out: Record<string, number | null> = {}
+  const estimatedIncome = useMemo(() => {
+    const out: Record<string, { net: number; gross: number } | null> = {}
     const names = [...new Set([...persons, ...(cfg?.adults ?? []).map((a) => a.name)])]
     for (const p of names) {
       const all = (data?.furusato_salaries ?? []).filter((s) => s.person === p && s.gross)
@@ -58,7 +59,7 @@ export default function Lifeplan() {
         continue
       }
       const info = (data?.furusato_years ?? []).find((r) => r.person === p && Number(r.year) === y)
-      out[p] = estimateNetIncome(
+      out[p] = estimateIncome(
         all.filter((s) => Number(s.year) === y),
         info?.bonus_base ?? null,
         parseBonusConfig(info?.bonus_config),
@@ -74,14 +75,26 @@ export default function Lifeplan() {
 
   const resolvedNet = useMemo(() => {
     const out: Record<string, number> = {}
-    for (const a of cfg?.adults ?? []) out[a.name] = a.net_income ?? estimatedNet[a.name] ?? 0
+    for (const a of cfg?.adults ?? []) out[a.name] = a.net_income ?? estimatedIncome[a.name]?.net ?? 0
     return out
-  }, [cfg, estimatedNet])
+  }, [cfg, estimatedIncome])
+
+  // 年金の想定: 額面は給与データ由来、無ければ手入力手取り÷0.78で概算
+  const pensionEstOf = (a: LifeplanAdult) => {
+    const gross = estimatedIncome[a.name]?.gross ?? (a.net_income ? Math.round(a.net_income / 0.78) : null)
+    return estimatePension(gross, a.retire_age)
+  }
+  const resolvedPension = useMemo(() => {
+    const out: Record<string, number> = {}
+    for (const a of cfg?.adults ?? []) out[a.name] = a.pension ?? pensionEstOf(a)
+    return out
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cfg, estimatedIncome])
 
   const startAssets = cfg?.start_assets_override ?? latestAssets ?? 0
   const result = useMemo(
-    () => (cfg ? simulate(cfg, startAssets, thisYear, resolvedNet) : null),
-    [cfg, startAssets, resolvedNet],
+    () => (cfg ? simulate(cfg, startAssets, thisYear, resolvedNet, resolvedPension) : null),
+    [cfg, startAssets, resolvedNet, resolvedPension],
   )
 
   if (!cfg || !result) return <p className="muted center">読み込み中…</p>
@@ -178,7 +191,7 @@ export default function Lifeplan() {
           <label className="field">子供費用の倍率（標準=1.0）
             <input type="text" inputMode="decimal" value={cfg.child_multiplier} onChange={(e) => upd({ child_multiplier: Number(e.target.value) || 0 })} /></label>
           <label className="field">開始資産（空欄=最新の記録を採用）
-            <input type="text" inputMode="numeric" placeholder={latestAssets !== null ? `自動: ${latestAssets.toLocaleString()}` : ''}
+            <input type="text" inputMode="numeric" placeholder={latestAssets !== null ? `自動: ${amt(latestAssets)}` : ''}
               value={cfg.start_assets_override ?? ''} onChange={(e) => upd({ start_assets_override: numOrNull(e.target.value) })} /></label>
         </div>
       </div>
@@ -212,15 +225,16 @@ export default function Lifeplan() {
                 <input type="text" inputMode="numeric" placeholder="例: 1995" value={a.birth_year ?? ''} onChange={(e) => updAdult(i, { birth_year: numOrNull(e.target.value) })} /></label>
               <label className="field">手取り年収（空欄=給与データから想定）
                 <input type="text" inputMode="numeric"
-                  placeholder={estimatedNet[a.name] ? `想定: ${estimatedNet[a.name]!.toLocaleString()}` : '給与データなし'}
+                  placeholder={estimatedIncome[a.name] ? `想定: ${amt(estimatedIncome[a.name]!.net)}` : '給与データなし'}
                   value={a.net_income ?? ''} onChange={(e) => updAdult(i, { net_income: numOrNull(e.target.value) })} /></label>
             </div>
             <div className="row2">
               <label className="field">退職年齢
                 <input type="text" inputMode="numeric" value={a.retire_age} onChange={(e) => updAdult(i, { retire_age: Number(e.target.value) || 0 })} /></label>
-              <label className="field">年金（年額）／受給開始年齢
+              <label className="field">年金（年額・空欄=想定）／受給開始年齢
                 <span style={{ display: 'flex', gap: 6 }}>
-                  <input type="text" inputMode="numeric" value={a.pension ?? ''} onChange={(e) => updAdult(i, { pension: numOrNull(e.target.value) })} />
+                  <input type="text" inputMode="numeric" placeholder={`想定: ${amt(pensionEstOf(a))}`}
+                    value={a.pension ?? ''} onChange={(e) => updAdult(i, { pension: numOrNull(e.target.value) })} />
                   <input type="text" inputMode="numeric" style={{ flex: '0 0 70px' }} value={a.pension_start} onChange={(e) => updAdult(i, { pension_start: Number(e.target.value) || 0 })} />
                 </span></label>
             </div>
@@ -232,6 +246,9 @@ export default function Lifeplan() {
             ＋ {p} を追加
           </button>
         ))}
+        <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>
+          年金の想定 = 基礎年金81.6万×加入年数/40 ＋ 平均年収（額面）×0.5481%×加入年数（22歳〜退職・最大65歳まで加入と仮定した簡易計算。ねんきん定期便の値があれば手入力が優先）
+        </p>
       </div>
 
       <div className="card">
@@ -315,6 +332,7 @@ export default function Lifeplan() {
               <tr className="muted">
                 <th style={{ padding: 4, textAlign: 'left' }}>年</th>
                 {cfg.adults.filter((a) => a.birth_year).map((a) => <th key={a.name} style={{ padding: 4, textAlign: 'right' }}>{a.name}</th>)}
+                {cfg.children.map((_, i) => <th key={`c${i}`} style={{ padding: 4, textAlign: 'right' }}>子{i + 1}</th>)}
                 <th style={{ padding: 4, textAlign: 'right' }}>収入</th>
                 <th style={{ padding: 4, textAlign: 'right' }}>支出</th>
                 <th style={{ padding: 4, textAlign: 'right' }}>名目資産</th>
@@ -326,6 +344,10 @@ export default function Lifeplan() {
                 <tr key={r.year} style={{ borderTop: '1px solid var(--border)' }}>
                   <td style={{ padding: 4 }}>{r.year}</td>
                   {r.ages.filter((a) => a.age !== null).map((a) => <td key={a.name} style={{ padding: 4, textAlign: 'right' }}>{a.age}歳</td>)}
+                  {cfg.children.map((c, i) => {
+                    const age = r.year - c.birth_year
+                    return <td key={`c${i}`} style={{ padding: 4, textAlign: 'right' }}>{age >= 0 ? `${age}歳` : '−'}</td>
+                  })}
                   <td style={{ padding: 4, textAlign: 'right' }}>{yenShort(r.income)}</td>
                   <td style={{ padding: 4, textAlign: 'right' }}>{yenShort(r.expense)}</td>
                   <td style={{ padding: 4, textAlign: 'right' }} className={r.assetsNominal < 0 ? 'neg' : ''}>{yenShort(r.assetsNominal)}</td>

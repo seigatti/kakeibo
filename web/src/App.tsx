@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useStore } from './store'
 import MemoWindow from './MemoWindow'
+import { setMasked } from './utils'
 import Dashboard from './pages/Dashboard'
 import Assets from './pages/Assets'
 import Cashflow from './pages/Cashflow'
@@ -32,11 +33,21 @@ export default function App() {
   const { config, data, loading, error, refresh } = useStore()
   const [route, setRoute] = useState(parseHash)
   const [memoOpen, setMemoOpen] = useState(localStorage.getItem('kakeibo.memoOpen') === '1')
+  const [masked, setMaskedState] = useState(localStorage.getItem('kakeibo.masked') === '1')
 
   const toggleMemo = (open: boolean) => {
     setMemoOpen(open)
     localStorage.setItem('kakeibo.memoOpen', open ? '1' : '0')
   }
+
+  const toggleMask = () => {
+    const next = !masked
+    setMaskedState(next)
+    localStorage.setItem('kakeibo.masked', next ? '1' : '0')
+  }
+
+  // 子コンポーネントの描画前にモジュールフラグへ反映（yen/yenShort/amt がマスクされる）
+  setMasked(masked)
 
   useEffect(() => {
     const onHash = () => setRoute(parseHash())
@@ -48,10 +59,14 @@ export default function App() {
   const tab: TabId = config ? route.tab : 'settings'
 
   return (
-    <div className="app">
+    <div className={masked ? 'app masked' : 'app'}>
       <header className="header">
         <h1>家計簿</h1>
         <div style={{ display: 'flex', gap: 8 }}>
+          <button className={masked ? 'icon-btn on' : 'icon-btn'} onClick={toggleMask}
+            title={masked ? '金額マスク中（クリックで表示）' : '金額をマスク'}>
+            {masked ? '🙈' : '👁'}
+          </button>
           <button className={memoOpen ? 'icon-btn on' : 'icon-btn'} onClick={() => toggleMemo(!memoOpen)} title="メモ">
             📝
           </button>

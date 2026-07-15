@@ -1,10 +1,24 @@
 import type { AssetRow, BonusConfig, ExpenseRow, FixedCostRow, FurusatoProfile, FurusatoSalary, IncomeRow } from './types'
 
+// ---- 金額マスク（他人に画面を見られても金額がわからないようにする全画面共通スイッチ） ----
+let masked = false
+export const setMasked = (v: boolean) => {
+  masked = v
+}
+export const isMasked = () => masked
+
 export const yen = (v: number | null | undefined) =>
-  v === null || v === undefined ? '−' : `${Math.round(v).toLocaleString('ja-JP')}円`
+  v === null || v === undefined ? '−' : masked ? '＊＊＊円' : `${Math.round(v).toLocaleString('ja-JP')}円`
 
 export const yenShort = (v: number) =>
-  Math.abs(v) >= 10000 ? `${(v / 10000).toLocaleString('ja-JP', { maximumFractionDigits: 0 })}万` : `${v.toLocaleString('ja-JP')}`
+  masked
+    ? '＊＊＊'
+    : Math.abs(v) >= 10000
+      ? `${(v / 10000).toLocaleString('ja-JP', { maximumFractionDigits: 0 })}万`
+      : `${v.toLocaleString('ja-JP')}`
+
+/** プレースホルダ等に金額を直接埋めるときに使う（マスク対応の toLocaleString） */
+export const amt = (v: number) => (masked ? '＊＊＊' : v.toLocaleString('ja-JP'))
 
 export const thisMonth = () => new Date().toISOString().slice(0, 7)
 export const today = () => new Date().toISOString().slice(0, 10)

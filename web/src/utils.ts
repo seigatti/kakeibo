@@ -98,14 +98,40 @@ export function effectiveIncomeByMonth(income: IncomeRow[], salaries: FurusatoSa
 
 // ================================================================ ふるさと納税 上限計算
 
-/** 給与所得控除（令和2年〜） */
-export function salaryIncomeDeduction(income: number): number {
-  if (income <= 1_625_000) return 550_000
-  if (income <= 1_800_000) return income * 0.4 - 100_000
-  if (income <= 3_600_000) return income * 0.3 + 80_000
-  if (income <= 6_600_000) return income * 0.2 + 440_000
-  if (income <= 8_500_000) return income * 0.1 + 1_100_000
-  return 1_950_000
+/** 給与所得控除の最低保障額（令和7・8年度税制改正で引上げ） */
+export function salaryDeductionMinimum(year: number): number {
+  if (year <= 2024) return 550_000
+  if (year === 2025) return 650_000
+  if (year === 2027 || year === 2028) return 740_000 // 2027・28年分は時限上乗せ
+  return 690_000 // 2026年分、2029年分〜
+}
+
+/** 給与所得控除（令和2年〜の速算表 + 年別の最低保障） */
+export function salaryIncomeDeduction(income: number, year: number = new Date().getFullYear()): number {
+  let d: number
+  if (income <= 1_625_000) d = 550_000
+  else if (income <= 1_800_000) d = income * 0.4 - 100_000
+  else if (income <= 3_600_000) d = income * 0.3 + 80_000
+  else if (income <= 6_600_000) d = income * 0.2 + 440_000
+  else if (income <= 8_500_000) d = income * 0.1 + 1_100_000
+  else d = 1_950_000
+  return Math.max(d, Math.min(salaryDeductionMinimum(year), income))
+}
+
+/**
+ * 所得税の基礎控除（令和7・8年度税制改正を反映。合計所得＝給与所得のみと仮定）
+ * 〜2024年分: 48万 / 2025・2026年分: 所得区分により95/88/68/63万＋本則(58万→2026年は62万) / 2027年分〜: 132万以下95万・他62万
+ */
+export function basicDeductionIT(shotoku: number, year: number): number {
+  if (year <= 2024) return 480_000
+  if (shotoku <= 1_320_000) return 950_000
+  if (year <= 2026) {
+    if (shotoku <= 3_360_000) return 880_000
+    if (shotoku <= 4_890_000) return 680_000
+    if (shotoku <= 6_550_000) return 630_000
+    return year === 2025 ? 580_000 : 620_000
+  }
+  return 620_000
 }
 
 /** 所得税の速算表（復興特別所得税を除く本税）。rate はふるさと特例式にも使用 */
@@ -143,6 +169,7 @@ export function dependentDeduction(age: number): { it: number; rt: number; label
 
 export interface FurusatoLimitInputs {
   income: number | null // 年収（給与）
+  year?: number // 対象年（基礎控除・給与所得控除の税制切替に使用。省略時は今年）
   social: number | null // 社会保険料（年額）
   lifePaid?: number | null // 生命保険料 支払額
   quakePaid?: number | null // 地震保険料 支払額
@@ -162,6 +189,7 @@ export interface FurusatoLimitBreakdown {
   medical: number
   spouse: { it: number; rt: number }
   dependents: Array<{ age: number; label: string; it: number; rt: number }>
+  basicIT: number // 所得税の基礎控除（年・所得により変動）
   taxableIT: number
   taxableRT: number
   incomeTax: number
@@ -178,8 +206,9 @@ export interface FurusatoLimitBreakdown {
  */
 export function furusatoLimitDetailed(inp: FurusatoLimitInputs): { limit: number; breakdown: FurusatoLimitBreakdown } | null {
   if (!inp.income || inp.income <= 0) return null
+  const year = inp.year ?? new Date().getFullYear()
   const social = inp.social ?? 0
-  const salaryDeduction = salaryIncomeDeduction(inp.income)
+  const salaryDeduction = salaryIncomeDeduction(inp.income, year)
   const shotoku = inp.income - salaryDeduction
 
   const life = inp.lifePaid ? lifeInsuranceDeduction(inp.lifePaid) : { it: 0, rt: 0 }
@@ -192,8 +221,9 @@ export function furusatoLimitDetailed(inp: FurusatoLimitInputs): { limit: number
   const depIT = dependents.reduce((s, d) => s + d.it, 0)
   const depRT = dependents.reduce((s, d) => s + d.rt, 0)
 
-  const taxableIT = Math.max(0, shotoku - social - life.it - quake.it - medical - spouse.it - depIT - 480_000)
-  const taxableRT = Math.max(0, shotoku - social - life.rt - quake.rt - medical - spouse.rt - depRT - 430_000)
+  const basicIT = basicDeductionIT(shotoku, year)
+  const taxableIT = Math.max(0, shotoku - social - life.it - quake.it - medical - spouse.it - depIT - basicIT)
+  const taxableRT = Math.max(0, shotoku - social - life.rt - quake.rt - medical - spouse.rt - depRT - 430_000) // 住民税の基礎控除は43万のまま
 
   const { tax: incomeTax, rate } = incomeTaxOf(taxableIT)
   const residentTax = taxableRT * 0.1
@@ -208,7 +238,7 @@ export function furusatoLimitDetailed(inp: FurusatoLimitInputs): { limit: number
   return {
     limit,
     breakdown: {
-      salaryDeduction, shotoku, social, life, quake, medical, spouse, dependents,
+      salaryDeduction, shotoku, social, life, quake, medical, spouse, dependents, basicIT,
       taxableIT, taxableRT, incomeTax, rate, residentTax, loanResident, residentTaxAfterLoan,
     },
   }

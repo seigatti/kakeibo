@@ -1,6 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Chart, Line } from 'react-chartjs-2'
+import HelpTip from '../components/HelpTip'
 import {
+  BASIC_PENSION_FULL,
+  childAllowanceByIndex,
   childAnnualCost,
   estimateIncome,
   estimatePension,
@@ -26,6 +29,32 @@ const NEW_CHILD: LifeplanChild = {
 }
 
 const numOrNull = (s: string) => (s.trim() === '' ? null : Number(s.replace(/[,，]/g, '')) || 0)
+
+/** 小数を途中入力できる数値欄（「0.」「1.5」などの入力中も値が消えない） */
+function DecimalField({ label, value, onChange, help }: { label: string; value: number; onChange: (v: number) => void; help?: ReactNode }) {
+  const [text, setText] = useState(String(value))
+  useEffect(() => {
+    const p = parseFloat(text)
+    if (Number.isNaN(p) ? value !== 0 : Math.abs(p - value) > 1e-9) setText(String(value))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value])
+  return (
+    <label className="field">
+      {label}
+      {help}
+      <input
+        type="text"
+        inputMode="decimal"
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value)
+          const p = parseFloat(e.target.value)
+          if (!Number.isNaN(p)) onChange(p)
+        }}
+      />
+    </label>
+  )
+}
 
 export default function Lifeplan() {
   const { data, mutate, saving } = useStore()
@@ -121,7 +150,14 @@ export default function Lifeplan() {
   return (
     <>
       <div className="card">
-        <h2>総資産の推移（{thisYear}〜{thisYear + 80}年）{head?.birth_year ? ' ※横軸カッコ内は' + head.name + 'の年齢' : ''}</h2>
+        <h2>
+          総資産の推移（{thisYear}〜{thisYear + 80}年）{head?.birth_year ? ' ※横軸カッコ内は' + head.name + 'の年齢' : ''}
+          <HelpTip title="総資産の計算">
+            毎年: 資産 = 前年資産 × (1＋運用利回り) ＋ 収入（給与・年金・カスタム収入） − 支出（基本生活費＋子供費用＋カスタム支出。毎年インフレ率分増加）。<br />
+            実質資産 = 名目資産 ÷ (1＋インフレ率)^経過年（今の価値に換算した「目減り後」の額）。<br />
+            名目資産が減らない場合は運用益が収支の赤字を上回っています（運用利回り0で収支のみの推移を確認可）。
+          </HelpTip>
+        </h2>
         <div className="chart-box">
           <Line
             data={{
@@ -146,14 +182,17 @@ export default function Lifeplan() {
           <p className="pos" style={{ fontSize: 13, margin: '6px 0 0' }}>✓ 80年後まで資産はマイナスになりません</p>
         )}
         <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>
-          実質資産 = インフレ率{cfg.inflation}%で今の価値に換算した額（資産の目減りを可視化）。<br />
-          毎年の計算: 資産 × (1+運用利回り) + 収入（給与・年金・カスタム） − 支出（基本生活費・子供費用・カスタム、インフレで増加）。
-          名目資産が減らない場合は運用益が収支の赤字を上回っています（運用利回りを0にすると収支だけの推移を確認できます）
+          実質資産 = インフレ率{cfg.inflation}%で今の価値に換算した額（計算式は見出しの「？」参照）
         </p>
       </div>
 
       <div className="card">
-        <h2>年間の収入と支出（名目）</h2>
+        <h2>
+          年間の収入と支出（名目）
+          <HelpTip title="このグラフの構成">
+            上向きバー = 収入（緑=給与、青緑=年金）。下向きバー = 支出（基本生活費＋子供費用＋カスタム支出）。黄線 = 支出のうち子供費用（児童手当差引後）。
+          </HelpTip>
+        </h2>
         <div className="chart-box">
           <Chart
             type="bar"
@@ -181,29 +220,27 @@ export default function Lifeplan() {
       <div className="card">
         <h2>基本設定</h2>
         <div className="row2">
-          <label className="field">実質インフレ率（%/年）
-            <input type="text" inputMode="decimal" value={cfg.inflation} onChange={(e) => upd({ inflation: Number(e.target.value) || 0 })} /></label>
-          <label className="field">運用利回り（%/年）
-            <input type="text" inputMode="decimal" value={cfg.invest_return} onChange={(e) => upd({ invest_return: Number(e.target.value) || 0 })} /></label>
+          <DecimalField label="実質インフレ率（%/年）" value={cfg.inflation} onChange={(v) => upd({ inflation: v })}
+            help={<HelpTip title="インフレ率">支出（基本生活費・子供費用・カスタム支出）が毎年この率で増えます。例: 2%なら10年後の生活費は約1.22倍。「実質資産」の換算（名目資産÷(1+率)^経過年）にも使われます。小数入力可（例: 1.5）。</HelpTip>} />
+          <DecimalField label="運用利回り（%/年）" value={cfg.invest_return} onChange={(v) => upd({ invest_return: v })}
+            help={<HelpTip title="運用利回り">資産全体が毎年この率で複利成長する想定です（投資・預金をまとめた平均利回り）。0にすると収支の積み上げだけの推移が確認できます。</HelpTip>} />
         </div>
         <div className="row2">
-          <label className="field">昇給率（%/年）
-            <input type="text" inputMode="decimal" value={cfg.raise_rate} onChange={(e) => upd({ raise_rate: Number(e.target.value) || 0 })} /></label>
-          <label className="field">年金の上昇率（%/年）
-            <input type="text" inputMode="decimal" value={cfg.pension_growth} onChange={(e) => upd({ pension_growth: Number(e.target.value) || 0 })} /></label>
+          <DecimalField label="昇給率（%/年）" value={cfg.raise_rate} onChange={(v) => upd({ raise_rate: v })}
+            help={<HelpTip title="昇給率">給与収入（手取り）が退職まで毎年この率で増える想定です。例: 0.1と入力すると毎年0.1%ずつ増加。</HelpTip>} />
+          <DecimalField label="年金の上昇率（%/年）" value={cfg.pension_growth} onChange={(v) => upd({ pension_growth: v })}
+            help={<HelpTip title="年金の上昇率">0 = 受給額が現在の額のまま増えない保守的な想定。年金は物価に完全には連動しない（マクロ経済スライド）ため控えめな値を推奨。物価連動を想定するならインフレ率と同じ値を入力。</HelpTip>} />
         </div>
         <div className="row2">
           <label className="field">基本生活費（年額・子供費用除く）
+            <HelpTip title="基本生活費">家賃・食費・光熱費など世帯の年間支出（子供にかかる分は除く。子供費用は下の子供設定から自動計算）。現在価格で入力し、毎年インフレ率分増えていきます。</HelpTip>
             <input type="text" inputMode="numeric" value={cfg.living_cost} onChange={(e) => upd({ living_cost: Number(e.target.value.replace(/[,，]/g, '')) || 0 })} /></label>
-          <label className="field">子供費用の倍率（標準=1.0）
-            <input type="text" inputMode="decimal" value={cfg.child_multiplier} onChange={(e) => upd({ child_multiplier: Number(e.target.value) || 0 })} /></label>
+          <DecimalField label="子供費用の倍率（標準=1.0）" value={cfg.child_multiplier} onChange={(v) => upd({ child_multiplier: v })}
+            help={<HelpTip title="子供費用の倍率">内蔵の標準費用（子供カードの？参照）に掛ける係数。ご家庭の実感に合わせて 0.8〜1.2 程度で調整してください（児童手当は倍率をかけずにそのまま差し引きます）。</HelpTip>} />
         </div>
         <label className="field">開始資産（空欄=最新の記録を採用）
           <input type="text" inputMode="numeric" placeholder={latestAssets !== null ? `自動: ${amt(latestAssets)}` : ''}
             value={cfg.start_assets_override ?? ''} onChange={(e) => upd({ start_assets_override: numOrNull(e.target.value) })} /></label>
-        <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>
-          年金の上昇率 0 = 受給額が現在の額のまま増えない想定（保守的）。物価連動を想定するならインフレ率と同じ値を入力。
-        </p>
       </div>
 
       <div className="card">
@@ -234,6 +271,9 @@ export default function Lifeplan() {
               <label className="field">生年（西暦）
                 <input type="text" inputMode="numeric" placeholder="例: 1995" value={a.birth_year ?? ''} onChange={(e) => updAdult(i, { birth_year: numOrNull(e.target.value) })} /></label>
               <label className="field">手取り年収（空欄=給与データから想定）
+                <HelpTip title="手取り年収の想定">
+                  収支タブの「月次給与」カードのデータから、手取り月平均（総支給−控除合計）×12 ＋ ボーナス想定×手取り率 で計算します。手入力があればそちらが優先されます。
+                </HelpTip>
                 <input type="text" inputMode="numeric"
                   placeholder={estimatedIncome[a.name] ? `想定: ${amt(estimatedIncome[a.name]!.net)}` : '給与データなし'}
                   value={a.net_income ?? ''} onChange={(e) => updAdult(i, { net_income: numOrNull(e.target.value) })} /></label>
@@ -242,6 +282,10 @@ export default function Lifeplan() {
               <label className="field">退職年齢
                 <input type="text" inputMode="numeric" value={a.retire_age} onChange={(e) => updAdult(i, { retire_age: Number(e.target.value) || 0 })} /></label>
               <label className="field">年金（年額・空欄=想定）／受給開始年齢
+                <HelpTip title="年金の想定式">
+                  老齢基礎年金 {Math.round(BASIC_PENSION_FULL / 100) / 100}万円（2026年度満額）× min(加入年数,40)/40 ＋ 老齢厚生年金 ≒ 平均年収（額面）× 0.5481% × 加入年数。
+                  加入年数 = 22歳〜退職（最大65歳）。額面は給与データから、無ければ手取り÷0.78で概算。ねんきん定期便の値があれば手入力が優先です。
+                </HelpTip>
                 <span style={{ display: 'flex', gap: 6 }}>
                   <input type="text" inputMode="numeric" placeholder={`想定: ${amt(pensionEstOf(a))}`}
                     value={a.pension ?? ''} onChange={(e) => updAdult(i, { pension: numOrNull(e.target.value) })} />
@@ -256,19 +300,39 @@ export default function Lifeplan() {
             ＋ {p} を追加
           </button>
         ))}
-        <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>
-          年金の想定 = 基礎年金81.6万×加入年数/40 ＋ 平均年収（額面）×0.5481%×加入年数（22歳〜退職・最大65歳まで加入と仮定した簡易計算。ねんきん定期便の値があれば手入力が優先）
-        </p>
       </div>
 
       <div className="card">
-        <h2>子供（状況ごとに費用を自動計算）</h2>
+        <h2>
+          子供（状況ごとに費用を自動計算）
+          <HelpTip title="子供費用の標準額（年額・現在価格）">
+            文科省「子供の学習費調査」等をもとにした概算（食費・衣類などの養育費込み）:
+            <table>
+              <tbody>
+                <tr><td style={{ textAlign: 'left' }}>0〜2歳</td><td>60万</td><td>保育園あり +50万</td></tr>
+                <tr><td style={{ textAlign: 'left' }}>3〜5歳</td><td colSpan={2}>70万（幼保無償化）</td></tr>
+                <tr><td style={{ textAlign: 'left' }}>小学校</td><td>公立 90万</td><td>私立 220万</td></tr>
+                <tr><td style={{ textAlign: 'left' }}>中学校</td><td>公立 115万</td><td>私立 205万</td></tr>
+                <tr><td style={{ textAlign: 'left' }}>高校</td><td>公立 110万</td><td>私立 125万</td></tr>
+                <tr><td style={{ textAlign: 'left' }}>大学(〜21歳)/大学院(〜23歳)</td><td>国公立 110万</td><td>私立 160万</td></tr>
+                <tr><td style={{ textAlign: 'left' }}>＋大学時の住まい</td><td>実家 40万</td><td>一人暮らし 120万</td></tr>
+              </tbody>
+            </table>
+            高校は2026年度からの授業料無償化（所得制限なし・私立支援上限45.7万円）を反映済み。高卒選択時は18歳以降0円。<br />
+            <b>児童手当を自動で差引き</b>: 3歳未満 月1.5万 / 3歳〜18歳年度末 月1万 / 第3子以降 月3万（22歳年度末までの子を年齢順に数えて3人目以降。所得制限なし）。
+          </HelpTip>
+        </h2>
         {cfg.children.map((c, i) => {
           const age = thisYear - c.birth_year
+          const allowance = childAllowanceByIndex(cfg.children, thisYear)[i]
+          const netCost = childAnnualCost(age, c) * cfg.child_multiplier - allowance
           return (
             <div key={i} style={{ borderTop: i > 0 ? '1px solid var(--border)' : undefined, paddingTop: i > 0 ? 10 : 0, marginBottom: 10 }}>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
-                <b style={{ flex: 1 }}>子{i + 1}（{age >= 0 ? `今年${age}歳` : `${c.birth_year}年生まれ予定`}・今年の費用 {yen(childAnnualCost(age, c) * cfg.child_multiplier)}）</b>
+                <b style={{ flex: 1 }}>
+                  子{i + 1}（{age >= 0 ? `今年${age}歳` : `${c.birth_year}年生まれ予定`}・今年の費用 {yen(netCost)}
+                  {allowance > 0 && <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>（児童手当 −{yen(allowance)} 済）</span>}）
+                </b>
                 <button className="btn danger small" onClick={() => upd({ children: cfg.children.filter((_, j) => j !== i) })}>✕</button>
               </div>
               <div className="row2">
@@ -310,7 +374,7 @@ export default function Lifeplan() {
         })}
         <button className="btn secondary small" onClick={() => upd({ children: [...cfg.children, { ...NEW_CHILD }] })}>＋ 子供を追加</button>
         <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>
-          費用は文科省「子供の学習費調査」等をもとにした標準額（食費など養育費込み・現在価格）。「子供費用の倍率」で全体を調整できます。
+          標準費用表と児童手当の詳細は見出しの「？」参照。「子供費用の倍率」で全体を調整できます。
         </p>
       </div>
 

@@ -2,8 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { Bar, Chart, Line } from 'react-chartjs-2'
 import { useStore } from '../store'
 import { DEFAULT_CATEGORIES } from '../types'
+import HelpTip from '../components/HelpTip'
+import { DEFAULT_PERSONS } from '../types'
 import { addMonths, amt, dataMonthRange, effectiveIncomeByMonth, expenseByMonth, fixedMonthlyTotal, netSalaryByMonth, thisMonth, yen, yenShort } from '../utils'
 import CsvImportCard from './CsvImportCard'
+import SalaryCard from './SalaryCard'
 
 const PALETTE = ['#38bdf8', '#4ade80', '#fbbf24', '#f87171', '#c084fc', '#fb923c', '#2dd4bf', '#a3e635']
 
@@ -16,6 +19,12 @@ export default function Cashflow() {
   const [newCat, setNewCat] = useState('')
   const [extraCats, setExtraCats] = useState<string[]>([])
   const [msg, setMsg] = useState('')
+
+  const persons = useMemo(() => {
+    const raw = data?.settings.find((s) => s.key === 'furusato_persons')?.value
+    const list = raw ? raw.split(',').map((s) => s.trim()).filter(Boolean) : DEFAULT_PERSONS
+    return list.length ? list : DEFAULT_PERSONS
+  }, [data])
 
   const categories = useMemo(() => {
     const fromSettings = data?.settings.find((s) => s.key === 'expense_categories')?.value
@@ -95,7 +104,11 @@ export default function Cashflow() {
           </button>
         )}
         <div className="row2">
-          <label className="field">給料（空欄=給与データの手取り）
+          <label className="field">
+            給料（空欄=給与データの手取り）
+            <HelpTip title="給料の自動採用">
+              給料が未入力の月は、下の「月次給与」カードで入力した給与の手取り（総支給−控除合計）を全員分合算して収入として使います。手入力があればそちらが優先されます。控除が未入力の月は総支給がそのまま使われます。
+            </HelpTip>
             <input type="text" inputMode="numeric" value={salary} onChange={(e) => setSalary(e.target.value)}
               placeholder={
                 netByMonth.get(month) !== undefined
@@ -129,6 +142,8 @@ export default function Cashflow() {
       </div>
 
       <CsvImportCard categories={categories} />
+
+      <SalaryCard persons={persons} />
 
       {chartMonths.length >= 2 && (
         <>

@@ -358,6 +358,64 @@ button {
   color: var(--accent);
 }
 
+/* ---- ヘルプ「？」 ---- */
+.helptip {
+  position: relative;
+  display: inline-block;
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
+.helptip-btn {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--muted);
+  background: none;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+
+.helptip-pop {
+  position: absolute;
+  z-index: 60;
+  left: 0;
+  top: 20px;
+  width: min(300px, 78vw);
+  background: var(--bg3);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.7;
+  color: var(--text);
+  white-space: normal;
+  text-align: left;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+}
+
+.helptip-pop.right {
+  left: auto;
+  right: 0;
+}
+
+.helptip-pop table {
+  border-collapse: collapse;
+  font-size: 11px;
+  margin: 4px 0;
+}
+
+.helptip-pop td,
+.helptip-pop th {
+  border: 1px solid var(--border);
+  padding: 2px 6px;
+  text-align: right;
+}
+
 /* 金額マスク中は数値入力欄の値も●で隠す（編集は可能。Chrome/Edge/Safari対応） */
 .masked input[inputmode='numeric'],
 .masked input[inputmode='decimal'] {

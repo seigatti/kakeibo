@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { APPLICATION_METHODS, APPLICATION_STATUSES, DEFAULT_PERSONS, type FurusatoItem, type FurusatoPerson } from '../types'
 import { amt, estimateSalary, furusatoLimitDetailed, parseBonusConfig, parseProfile, yen } from '../utils'
+import HelpTip from '../components/HelpTip'
 import ProfileCard from './ProfileCard'
-import SalaryCard from './SalaryCard'
 
 const EMPTY_ITEM = {
   id: '',
@@ -35,6 +35,7 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
   const [newPerson, setNewPerson] = useState('')
   const [renames, setRenames] = useState<Record<string, string>>({})
   const appliedPrefill = useRef<string | null>(null)
+  const itemFormRef = useRef<HTMLDivElement>(null)
 
   // 管理者リスト（settings の furusato_persons、既定は せ,あ）
   const persons = useMemo(() => {
@@ -156,16 +157,20 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
     [data, person, year, yearInfo],
   )
   const socialEstimated = salaryEst && salaryEst.annualSocial > 0 ? salaryEst.annualSocial : null
-  // 社会保険料: 手動入力が無ければ月次給与からの想定値を自動採用（計算上限と同じ「手動優先」方式）
+  // 社会保険料・年収: 手動入力が無ければ月次給与からの想定値を自動採用（手動優先方式）
   const socialAdopted = num(yearForm.social_insurance) ?? socialEstimated
   const usingEstimatedSocial = num(yearForm.social_insurance) === null && socialEstimated !== null
+  const incomeEstimated = salaryEst?.annualIncome ?? null
+  const incomeAdopted = num(yearForm.income) ?? incomeEstimated
+  const usingEstimatedIncome = num(yearForm.income) === null && incomeEstimated !== null
 
   // 世帯控除プロフィール（世帯で1つ。家族系控除は世帯主にのみ適用）
   const profile = useMemo(() => parseProfile(data?.settings.find((s) => s.key === 'furusato_profile')?.value), [data])
   const isHead = profile.head_person !== null && profile.head_person === person
 
   const detailed = furusatoLimitDetailed({
-    income: num(yearForm.income),
+    income: incomeAdopted,
+    year,
     social: socialAdopted,
     lifePaid: num(yearForm.life_paid),
     quakePaid: num(yearForm.quake_paid),
@@ -244,7 +249,8 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
       memo: it.memo ?? '',
     })
     setEditing(true)
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+    // 「寄付を編集」カードの位置へスクロール（最上部ではなく）
+    itemFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   const removeItem = async (it: FurusatoItem) => {
@@ -316,7 +322,17 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
 
       <div className="card">
         <h2>{year}年の上限額（{person}）</h2>
-        <div className="kv"><span className="muted">採用上限</span><span className="big" style={{ fontSize: 20 }}>{limitAdopted !== null ? yen(limitAdopted) : '未設定'}</span></div>
+        <div className="kv">
+          <span className="muted">
+            採用上限
+            <HelpTip title="上限額の決まり方">
+              優先順位: ①「上限の手動指定」（税額通知書ベースの正確な値）→ ②計算値。<br />
+              計算式（総務省の標準式）: 上限 = 住民税所得割 × 20% ÷ (90% − 所得税率 × 1.021) + 2,000円。
+              住民税所得割 = (給与所得 − 各種控除) × 10% から住宅ローン控除（住民税側）を差引き。千円未満切捨て。
+            </HelpTip>
+          </span>
+          <span className="big" style={{ fontSize: 20 }}>{limitAdopted !== null ? yen(limitAdopted) : '未設定'}</span>
+        </div>
         <div className="kv"><span className="muted">購入済み合計（{purchased.length}件）</span><span>{yen(purchasedTotal)}</span></div>
         <div className="kv" style={{ borderTop: '1px solid var(--border)', paddingTop: 6 }}>
           <span>追加可能額</span>
@@ -325,21 +341,40 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
         <details style={{ marginTop: 8 }} open={limitOpen} onToggle={(e) => setLimitOpen((e.target as HTMLDetailsElement).open)}>
           <summary className="muted" style={{ fontSize: 13, cursor: 'pointer' }}>上限の計算・入力（年収・社会保険料など）</summary>
           <div className="row2" style={{ marginTop: 8 }}>
-            <label className="field">年収（税込・想定可）
-              <input type="text" inputMode="numeric" value={yearForm.income} onChange={(e) => setYearForm({ ...yearForm, income: e.target.value })} /></label>
-            <label className="field">社会保険料（年額・空欄なら想定値を採用）
+            <label className="field">
+              年収（額面・空欄なら想定を採用）
+              <HelpTip title="年収の自動採用">
+                空欄の場合、収支タブの「月次給与」カードに入力した給与から額面年収を想定して使います（未入力月は平均で補完＋ボーナス想定）。手入力があればそちらが優先されます。
+              </HelpTip>
+              <input type="text" inputMode="numeric"
+                placeholder={incomeEstimated !== null ? `想定: ${amt(incomeEstimated)}` : ''}
+                value={yearForm.income} onChange={(e) => setYearForm({ ...yearForm, income: e.target.value })} /></label>
+            <label className="field">
+              社会保険料（年額・空欄なら想定を採用）
+              <HelpTip title="社会保険料の自動採用">
+                空欄の場合、月次給与の健康保険・厚生年金・雇用保険から年額を想定して使います（平均月社保×12＋賞与分の概算）。手入力優先。
+              </HelpTip>
               <input type="text" inputMode="numeric"
                 placeholder={socialEstimated !== null ? `想定: ${amt(socialEstimated)}` : ''}
                 value={yearForm.social_insurance} onChange={(e) => setYearForm({ ...yearForm, social_insurance: e.target.value })} /></label>
           </div>
           <div className="row2">
-            <label className="field">生命保険料 支払額（年）
+            <label className="field">
+              生命保険料 支払額（年）
+              <HelpTip title="生命保険料控除">
+                新制度・一般生命保険のみの簡易計算。所得税側: 〜2万円全額 / 〜4万円 半額+1万 / 〜8万円 1/4+2万 / 上限4万円。
+                住民税側: 〜1.2万円全額 / 〜3.2万円 半額+0.6万 / 〜5.6万円 1/4+1.4万 / 上限2.8万円。
+              </HelpTip>
               <input type="text" inputMode="numeric" value={yearForm.life_paid} onChange={(e) => setYearForm({ ...yearForm, life_paid: e.target.value })} /></label>
-            <label className="field">地震保険料 支払額（年）
+            <label className="field">
+              地震保険料 支払額（年）
+              <HelpTip title="地震保険料控除">所得税側: 支払額そのまま（上限5万円）。住民税側: 支払額の半分（上限2.5万円）。</HelpTip>
               <input type="text" inputMode="numeric" value={yearForm.quake_paid} onChange={(e) => setYearForm({ ...yearForm, quake_paid: e.target.value })} /></label>
           </div>
           <div className="row2">
-            <label className="field">医療費 支払額（年）
+            <label className="field">
+              医療費 支払額（年）
+              <HelpTip title="医療費控除">控除額 = 支払額 −「10万円 or 給与所得の5%の小さい方」（マイナスなら0）。保険金で補填された分は支払額から除いて入力してください。</HelpTip>
               <input type="text" inputMode="numeric" value={yearForm.medical_paid} onChange={(e) => setYearForm({ ...yearForm, medical_paid: e.target.value })} /></label>
             <label className="field">医療費控除額の直接指定（任意・優先）
               <input type="text" inputMode="numeric"
@@ -349,15 +384,17 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
           <label className="field">上限の手動指定（最優先）
             <input type="text" inputMode="numeric" placeholder={limitAuto ? `計算値: ${amt(limitAuto)}` : ''} value={yearForm.limit_manual} onChange={(e) => setYearForm({ ...yearForm, limit_manual: e.target.value })} /></label>
           <p className="muted" style={{ fontSize: 12 }}>
-            計算上限（目安）: <b>{limitAuto !== null ? yen(limitAuto) : '年収を入力してください'}</b><br />
+            計算上限（目安）: <b>{limitAuto !== null ? yen(limitAuto) : '年収を入力するか、収支タブで給与を入力してください'}</b><br />
+            {usingEstimatedIncome && (
+              <>※年収は月次給与からの想定値（{yen(incomeEstimated)}）を使用中<br /></>
+            )}
             {usingEstimatedSocial && (
               <>※社会保険料は月次給与からの想定値（{yen(socialEstimated)}）を使用中<br /></>
             )}
             {profile.head_person && !isHead && (
               <>※配偶者・扶養・住宅ローン控除は世帯主（{profile.head_person}）の計算にのみ適用されます<br /></>
             )}
-            ※生命保険料控除は新制度・一般区分のみの簡易計算。配偶者特別控除・調整控除などは省略した目安です。
-            税額通知書などで正確な値が分かったら「手動指定」に入れてください。
+            ※配偶者特別控除・調整控除などは省略した目安です。税額通知書などで正確な値が分かったら「手動指定」に入れてください。
           </p>
           {detailed && (
             <details style={{ marginBottom: 10 }}>
@@ -380,6 +417,15 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
                 {detailed.breakdown.dependents.map((d, i) => (
                   <div className="kv" key={i}><span className="muted">扶養控除 {d.age}歳（{d.label}）</span><span>{d.it > 0 ? `${yen(d.it)} / ${yen(d.rt)}` : '0円'}</span></div>
                 ))}
+                <div className="kv">
+                  <span className="muted">
+                    基礎控除（所得税/住民税）
+                    <HelpTip title="基礎控除（2025・2026年税制改正対応）">
+                      所得税側は対象年と所得で変動: 〜2024年=48万 / 2025・26年=所得により95・88・68・63万＋本則（2026年は62万） / 2027年〜=132万円以下95万・他62万。住民税側は43万円で据え置き。
+                    </HelpTip>
+                  </span>
+                  <span>{yen(detailed.breakdown.basicIT)} / {yen(430000)}</span>
+                </div>
                 <div className="kv"><span className="muted">課税所得（所得税/住民税）</span><span>{yen(detailed.breakdown.taxableIT)} / {yen(detailed.breakdown.taxableRT)}</span></div>
                 <div className="kv"><span className="muted">所得税額（税率{Math.round(detailed.breakdown.rate * 100)}%）</span><span>{yen(detailed.breakdown.incomeTax)}</span></div>
                 <div className="kv"><span className="muted">住民税所得割</span><span>{yen(detailed.breakdown.residentTax)}</span></div>
@@ -395,25 +441,11 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
 
       <ProfileCard persons={persons} year={year} profile={profile} />
 
+      <p className="muted" style={{ fontSize: 12, margin: '0 4px 12px' }}>
+        💡 月次給与の入力カードは<b>収支タブ</b>へ移動しました（入力した給与はこのページの上限計算にも自動で使われます）
+      </p>
 
-
-      <SalaryCard
-        person={person}
-        year={year}
-        yearInfo={yearInfo}
-        onReflect={(income, social) => {
-          setYearForm({
-            ...yearForm,
-            income: String(income),
-            social_insurance: social !== null ? String(social) : yearForm.social_insurance,
-          })
-          setLimitOpen(true)
-          setMsg('年収想定を上限計算に反映しました。「上限情報を保存」で確定してください')
-          window.scrollTo({ top: 0, behavior: 'smooth' })
-        }}
-      />
-
-      <div className="card">
+      <div className="card" ref={itemFormRef}>
         <h2>{editing ? '寄付を編集' : '寄付・候補を追加'}</h2>
         <div className="row2">
           <label className="field">対象年（空欄=候補）

@@ -84,8 +84,9 @@ export function parseLifeplan(json: string | null | undefined): LifeplanConfig {
 }
 
 /**
- * 子供1人の年間費用（現在価格）。
- * 目安の出典: 文部科学省「子供の学習費調査」等の概算（学費＋食費・衣類などの養育費込み）
+ * 子供1人の年間費用（現在価格・児童手当差引前）。
+ * 目安の出典: 文部科学省「子供の学習費調査」等の概算（学費＋食費・衣類などの養育費込み）。
+ * 高校は2026年度からの授業料無償化（所得制限なし・私立は就学支援金上限45.7万円）を反映済み。
  */
 export function childAnnualCost(age: number, c: LifeplanChild): number {
   if (age < 0) return 0
@@ -93,13 +94,32 @@ export function childAnnualCost(age: number, c: LifeplanChild): number {
   if (age <= 5) return 700_000
   if (age <= 11) return c.elementary === '私立' ? 2_200_000 : 900_000
   if (age <= 14) return c.junior === '私立' ? 2_050_000 : 1_150_000
-  if (age <= 17) return c.high === '私立' ? 1_700_000 : 1_160_000
+  if (age <= 17) return c.high === '私立' ? 1_250_000 : 1_100_000 // 授業料無償化反映後
   if (c.path === '高卒') return 0
   const lastAge = c.path === '大学院' ? 23 : 21
   if (age <= lastAge) {
     return (c.college === '私立' ? 1_600_000 : 1_100_000) + (c.living === '一人暮らし' ? 1_200_000 : 400_000)
   }
   return 0
+}
+
+/**
+ * 児童手当（2024年10月改正・2026年時点の現行制度）:
+ * 3歳未満 月1.5万 / 3歳〜18歳年度末 月1万 / 第3子以降 月3万（所得制限なし）。
+ * 第3子の数え方 = 22歳年度末までの子を年齢の高い順に数えて3番目以降。
+ * @returns cfg.children と同じ並びの、その年の児童手当（年額）
+ */
+export function childAllowanceByIndex(children: LifeplanChild[], year: number): number[] {
+  const ranked = children
+    .map((c, idx) => ({ idx, age: year - c.birth_year }))
+    .filter((x) => x.age >= 0 && x.age <= 22)
+    .sort((a, b) => b.age - a.age)
+  const out = children.map(() => 0)
+  ranked.forEach((x, rank) => {
+    if (x.age > 18) return // カウントには入るが支給は18歳年度末まで
+    out[x.idx] = rank >= 2 ? 360_000 : x.age <= 2 ? 180_000 : 120_000
+  })
+  return out
 }
 
 /** 給与データから年収を想定。net=手取り（手取り月平均×12 + ボーナス×手取り率）、gross=額面 */
@@ -122,14 +142,17 @@ export function estimateNetIncome(entries: FurusatoSalary[], bonusBase: number |
   return estimateIncome(entries, bonusBase, bonusConfig)?.net ?? null
 }
 
+/** 老齢基礎年金の満額（2026年度=令和8年度: 847,300円/年） */
+export const BASIC_PENSION_FULL = 847_300
+
 /**
  * 年金の年額を想定（簡易式）:
- * 老齢基礎年金 816,000円 × min(加入年数,40)/40 + 老齢厚生年金 ≒ 平均年収(額面) × 0.5481% × 加入年数
+ * 老齢基礎年金 847,300円(2026年度満額) × min(加入年数,40)/40 + 老齢厚生年金 ≒ 平均年収(額面) × 0.5481% × 加入年数
  * 加入年数 = min(退職年齢, 65) − 22
  */
 export function estimatePension(grossAnnual: number | null, retireAge: number): number {
   const years = Math.max(0, Math.min(retireAge, 65) - 22)
-  const basic = 816_000 * (Math.min(years, 40) / 40)
+  const basic = BASIC_PENSION_FULL * (Math.min(years, 40) / 40)
   const kosei = (grossAnnual ?? 0) * 0.005481 * years
   return Math.round(basic + kosei)
 }
@@ -187,10 +210,12 @@ export function simulate(
       if (pensionAmount > 0 && age >= a.pension_start) pension += pensionAmount * pensionGrow
     }
 
+    // 子供費用（倍率適用後）から児童手当を差し引いた純額
+    const allowances = childAllowanceByIndex(cfg.children, year)
     let childCost = 0
-    for (const c of cfg.children) {
-      childCost += childAnnualCost(year - c.birth_year, c) * cfg.child_multiplier
-    }
+    cfg.children.forEach((c, idx) => {
+      childCost += childAnnualCost(year - c.birth_year, c) * cfg.child_multiplier - allowances[idx]
+    })
 
     let customIn = 0
     let customOut = 0

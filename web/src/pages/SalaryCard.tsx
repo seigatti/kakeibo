@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
+import HelpTip from '../components/HelpTip'
 import { useStore } from '../store'
-import type { BonusConfig, FurusatoPerson, FurusatoYear } from '../types'
+import type { BonusConfig } from '../types'
 import { deductionTotal, estimateSalary, parseBonusConfig, yen } from '../utils'
 
 interface Props {
-  person: FurusatoPerson
-  year: number
-  yearInfo: FurusatoYear | undefined
-  onReflect: (income: number, social: number | null) => void
+  persons: string[] // 管理者リスト（カード内で切替）
 }
 
 const EMPTY_MONTH = { gross: '', health: '', pension_ins: '', employment: '', income_tax: '', resident_tax: '' }
@@ -34,14 +32,33 @@ function CalcBadge({ kind }: { kind: 'income' | 'social' | 'none' }) {
   )
 }
 
-export default function SalaryCard({ person, year, yearInfo, onReflect }: Props) {
+const thisYear = new Date().getFullYear()
+
+export default function SalaryCard({ persons }: Props) {
   const { data, mutate, saving } = useStore()
+  const [personState, setPersonState] = useState(localStorage.getItem('kakeibo.furusatoPerson') || '')
+  const [year, setYear] = useState(thisYear)
   const [month, setMonth] = useState(1)
   const [form, setForm] = useState(EMPTY_MONTH)
   const [bonusBase, setBonusBase] = useState('')
   const [bonusRows, setBonusRows] = useState<BonusRow[]>([])
   const [copyTargets, setCopyTargets] = useState<number[]>([])
   const [msg, setMsg] = useState('')
+
+  const person = persons.includes(personState) ? personState : persons[0]
+  const selectPerson = (p: string) => {
+    setPersonState(p)
+    localStorage.setItem('kakeibo.furusatoPerson', p)
+  }
+
+  const yearInfo = useMemo(
+    () => (data?.furusato_years ?? []).find((y) => y.person === person && Number(y.year) === year),
+    [data, person, year],
+  )
+  const allYears = useMemo(() => {
+    const ys = (data?.furusato_salaries ?? []).filter((s) => s.person === person).map((s) => Number(s.year))
+    return [...new Set([thisYear - 1, thisYear, thisYear + 1, ...ys])].sort((a, b) => b - a)
+  }, [data, person])
 
   const salaries = useMemo(
     () => (data?.furusato_salaries ?? []).filter((s) => s.person === person && Number(s.year) === year),
@@ -160,19 +177,46 @@ export default function SalaryCard({ person, year, yearInfo, onReflect }: Props)
 
   return (
     <div className="card">
-      <h2>月次給与から年収を想定（{person}・{year}年）</h2>
+      <h2>
+        月次給与から年収を想定
+        <HelpTip title="このカードの役割">
+          給与明細を月ごとに記録すると、年収・社会保険料・手取りを自動で想定し、
+          収支の収入（給料が未入力の月）、ふるさと納税の上限計算、ライフプランの手取り・年金想定に共通で使われます。
+        </HelpTip>
+      </h2>
+      <div className="seg">
+        {persons.map((p) => (
+          <button key={p} className={person === p ? 'on' : ''} onClick={() => selectPerson(p)}>{p}</button>
+        ))}
+        <select style={{ flex: 1, marginTop: 0, width: 'auto' }} value={year} onChange={(e) => setYear(Number(e.target.value))}>
+          {allYears.map((y) => <option key={y} value={y}>{y}年</option>)}
+        </select>
+      </div>
       {est ? (
         <>
-          <div className="kv"><span className="muted">年収想定（給与{est.enteredMonths}ヶ月入力）</span><b>{yen(est.annualIncome)}</b></div>
+          <div className="kv">
+            <span className="muted">
+              年収想定（給与{est.enteredMonths}ヶ月入力）
+              <HelpTip title="年収想定の式">
+                入力済みの月はその総支給額、未入力の月は入力済み月の平均額で1〜12月を埋めて合計し、ボーナス想定を加算します。<br />
+                ボーナス = 手動金額（優先） or 基準月額×か月分（基準未入力なら平均総支給で代用）
+              </HelpTip>
+            </span>
+            <b>{yen(est.annualIncome)}</b>
+          </div>
           <div className="kv"><span className="muted">　うちボーナス</span><span style={{ color: 'var(--amber)' }}>{yen(est.bonusTotal)}</span></div>
-          <div className="kv"><span className="muted">社会保険料想定</span><b>{est.annualSocial > 0 ? yen(est.annualSocial) : '社保の入力なし'}</b></div>
+          <div className="kv">
+            <span className="muted">
+              社会保険料想定
+              <HelpTip title="社会保険料想定の式">
+                平均月社保（健康保険＋厚生年金＋雇用保険）×12ヶ月 ＋ ボーナス合計×社保率（平均月社保÷平均月総支給）。賞与にも社会保険がかかる分の概算です。
+              </HelpTip>
+            </span>
+            <b>{est.annualSocial > 0 ? yen(est.annualSocial) : '社保の入力なし'}</b>
+          </div>
           {est.usedAvgAsBonusBase && (
             <p className="muted" style={{ fontSize: 12, margin: '4px 0' }}>※ボーナス基準月額が未入力のため平均総支給で代用しています</p>
           )}
-          <button className="btn secondary" style={{ margin: '8px 0' }}
-            onClick={() => onReflect(est.annualIncome, est.annualSocial > 0 ? est.annualSocial : null)}>
-            この想定を上限計算に反映 ↑
-          </button>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ fontSize: 12, borderCollapse: 'collapse', width: '100%' }}>
               <thead>
@@ -246,7 +290,13 @@ export default function SalaryCard({ person, year, yearInfo, onReflect }: Props)
         <label className="field">住民税<CalcBadge kind="none" />
           <input type="text" inputMode="numeric" value={form.resident_tax} onChange={(e) => setForm({ ...form, resident_tax: e.target.value })} /></label>
       </div>
-      <div className="kv"><span className="muted">控除合計（自動計算）</span><b>{formDeduction !== null ? yen(formDeduction) : '−'}</b></div>
+      <div className="kv">
+        <span className="muted">
+          控除合計（自動計算）
+          <HelpTip>控除合計 = 健康保険 + 厚生年金保険 + 雇用保険 + 所得税 + 住民税（自動計算のため保存はされません）。総支給 − 控除合計 = 手取りとして収支タブの収入にも使われます。</HelpTip>
+        </span>
+        <b>{formDeduction !== null ? yen(formDeduction) : '−'}</b>
+      </div>
       <button className="btn" onClick={() => void saveMonth()} disabled={saving}>{saving ? '保存中…' : `${month}月分を保存`}</button>
       {salaries.some((s) => Number(s.month) === month) && (
         <button className="btn danger" style={{ marginTop: 8 }} onClick={() => void clearMonth()}>この月の記録を削除</button>

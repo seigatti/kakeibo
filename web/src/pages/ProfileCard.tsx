@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import HelpTip from '../components/HelpTip'
 import { useStore } from '../store'
 import type { FurusatoProfile } from '../types'
 import { dependentDeduction, yen } from '../utils'
@@ -56,6 +57,12 @@ export default function ProfileCard({ persons, year, profile }: { persons: strin
         </summary>
         <p className="muted" style={{ fontSize: 12 }}>
           頻繁に変わらない設定です。配偶者・扶養・住宅ローン控除は<b>世帯主の上限計算にのみ</b>反映されます。
+          <HelpTip title="各控除の計算">
+            扶養控除（対象年12/31時点の年齢で自動判定・所得税/住民税）:<br />
+            16歳未満=対象外 / 16〜18歳=38万/33万 / 19〜22歳（特定）=63万/45万 / 23〜69歳=38万/33万 / 70歳〜（老人）=48万/38万。<br />
+            配偶者控除=38万/33万。<br />
+            住宅ローン控除: 年間控除額のうち所得税から引き切れない分が住民税から控除され（上限: 所得税課税所得×7%か136,500円）、その分ふるさとの上限が下がります。
+          </HelpTip>
         </p>
         <label className="field">世帯主
           <select value={head} onChange={(e) => setHead(e.target.value)}>

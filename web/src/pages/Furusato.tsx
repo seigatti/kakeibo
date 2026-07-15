@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { APPLICATION_METHODS, APPLICATION_STATUSES, DEFAULT_PERSONS, type FurusatoItem, type FurusatoPerson } from '../types'
-import { estimateSalary, furusatoLimit, parseBonusConfig, yen } from '../utils'
+import { estimateSalary, furusatoLimitDetailed, parseBonusConfig, parseProfile, yen } from '../utils'
+import ProfileCard from './ProfileCard'
 import SalaryCard from './SalaryCard'
 
 const EMPTY_ITEM = {
@@ -24,7 +25,10 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
   const [year, setYear] = useState(thisYear)
   const [form, setForm] = useState(EMPTY_ITEM)
   const [editing, setEditing] = useState(false)
-  const [yearForm, setYearForm] = useState({ income: '', social_insurance: '', medical_deduction: '', limit_manual: '' })
+  const [yearForm, setYearForm] = useState({
+    income: '', social_insurance: '', medical_deduction: '', limit_manual: '',
+    life_paid: '', quake_paid: '', medical_paid: '',
+  })
   const [msg, setMsg] = useState('')
   const [limitOpen, setLimitOpen] = useState(false)
   const [personEdit, setPersonEdit] = useState(false)
@@ -71,6 +75,14 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
     if (!to || to === from || persons.includes(to)) return
     await mutate('renameFurusatoPerson', { from, to }) // 既存データを一括引き継ぎ
     await savePersons(persons.map((p) => (p === from ? to : p)))
+    // 世帯主が旧名なら控除プロフィールも追随
+    const raw = data?.settings.find((s) => s.key === 'furusato_profile')?.value
+    if (raw) {
+      const prof = parseProfile(raw)
+      if (prof.head_person === from) {
+        await mutate('setSetting', { row: { key: 'furusato_profile', value: JSON.stringify({ ...prof, head_person: to }) } })
+      }
+    }
     setRenames({ ...renames, [from]: '' })
     if (person === from) selectPerson(to)
   }
@@ -91,6 +103,9 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
       social_insurance: yearInfo?.social_insurance?.toString() ?? '',
       medical_deduction: yearInfo?.medical_deduction?.toString() ?? '',
       limit_manual: yearInfo?.limit_manual?.toString() ?? '',
+      life_paid: yearInfo?.life_paid?.toString() ?? '',
+      quake_paid: yearInfo?.quake_paid?.toString() ?? '',
+      medical_paid: yearInfo?.medical_paid?.toString() ?? '',
     })
   }, [yearInfo])
 
@@ -132,7 +147,22 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
   const socialAdopted = num(yearForm.social_insurance) ?? socialEstimated
   const usingEstimatedSocial = num(yearForm.social_insurance) === null && socialEstimated !== null
 
-  const limitAuto = furusatoLimit(num(yearForm.income), socialAdopted, num(yearForm.medical_deduction))
+  // 世帯控除プロフィール（世帯で1つ。家族系控除は世帯主にのみ適用）
+  const profile = useMemo(() => parseProfile(data?.settings.find((s) => s.key === 'furusato_profile')?.value), [data])
+  const isHead = profile.head_person !== null && profile.head_person === person
+
+  const detailed = furusatoLimitDetailed({
+    income: num(yearForm.income),
+    social: socialAdopted,
+    lifePaid: num(yearForm.life_paid),
+    quakePaid: num(yearForm.quake_paid),
+    medicalPaid: num(yearForm.medical_paid),
+    medicalDeductionOverride: num(yearForm.medical_deduction),
+    spouse: isHead ? profile.spouse : false,
+    dependentAges: isHead ? profile.dependents.map((d) => year - d.birth_year) : [],
+    loanAnnualDeduction: isHead && profile.housing_loan.enabled ? profile.housing_loan.annual_deduction : null,
+  })
+  const limitAuto = detailed?.limit ?? null
   const limitAdopted = num(yearForm.limit_manual) ?? limitAuto
   const purchased = items.filter((i) => Number(i.year) === year && i.application_status !== '未購入' && i.price)
   const purchasedTotal = purchased.reduce((s, i) => s + (i.price ?? 0), 0)
@@ -152,6 +182,9 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
         social_insurance: num(yearForm.social_insurance),
         medical_deduction: num(yearForm.medical_deduction),
         limit_manual: num(yearForm.limit_manual),
+        life_paid: num(yearForm.life_paid),
+        quake_paid: num(yearForm.quake_paid),
+        medical_paid: num(yearForm.medical_paid),
         memo: yearInfo?.memo ?? null,
         // ボーナス設定は給与カード側で管理しているため既存値を保全する
         bonus_base: yearInfo?.bonus_base ?? null,
@@ -287,22 +320,69 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
                 value={yearForm.social_insurance} onChange={(e) => setYearForm({ ...yearForm, social_insurance: e.target.value })} /></label>
           </div>
           <div className="row2">
-            <label className="field">医療費控除など
-              <input type="text" inputMode="numeric" value={yearForm.medical_deduction} onChange={(e) => setYearForm({ ...yearForm, medical_deduction: e.target.value })} /></label>
-            <label className="field">上限の手動指定（優先）
-              <input type="text" inputMode="numeric" placeholder={limitAuto ? `計算値: ${limitAuto.toLocaleString()}` : ''} value={yearForm.limit_manual} onChange={(e) => setYearForm({ ...yearForm, limit_manual: e.target.value })} /></label>
+            <label className="field">生命保険料 支払額（年）
+              <input type="text" inputMode="numeric" value={yearForm.life_paid} onChange={(e) => setYearForm({ ...yearForm, life_paid: e.target.value })} /></label>
+            <label className="field">地震保険料 支払額（年）
+              <input type="text" inputMode="numeric" value={yearForm.quake_paid} onChange={(e) => setYearForm({ ...yearForm, quake_paid: e.target.value })} /></label>
           </div>
+          <div className="row2">
+            <label className="field">医療費 支払額（年）
+              <input type="text" inputMode="numeric" value={yearForm.medical_paid} onChange={(e) => setYearForm({ ...yearForm, medical_paid: e.target.value })} /></label>
+            <label className="field">医療費控除額の直接指定（任意・優先）
+              <input type="text" inputMode="numeric"
+                placeholder={detailed && num(yearForm.medical_paid) ? `自動計算: ${Math.round(detailed.breakdown.medical).toLocaleString()}` : ''}
+                value={yearForm.medical_deduction} onChange={(e) => setYearForm({ ...yearForm, medical_deduction: e.target.value })} /></label>
+          </div>
+          <label className="field">上限の手動指定（最優先）
+            <input type="text" inputMode="numeric" placeholder={limitAuto ? `計算値: ${limitAuto.toLocaleString()}` : ''} value={yearForm.limit_manual} onChange={(e) => setYearForm({ ...yearForm, limit_manual: e.target.value })} /></label>
           <p className="muted" style={{ fontSize: 12 }}>
             計算上限（目安）: <b>{limitAuto !== null ? yen(limitAuto) : '年収を入力してください'}</b><br />
             {usingEstimatedSocial && (
               <>※社会保険料は月次給与からの想定値（{yen(socialEstimated)}）を使用中<br /></>
             )}
-            ※給与収入のみ・配偶者控除なしの簡易計算です。住宅ローン控除等がある場合はズレます。
+            {profile.head_person && !isHead && (
+              <>※配偶者・扶養・住宅ローン控除は世帯主（{profile.head_person}）の計算にのみ適用されます<br /></>
+            )}
+            ※生命保険料控除は新制度・一般区分のみの簡易計算。配偶者特別控除・調整控除などは省略した目安です。
             税額通知書などで正確な値が分かったら「手動指定」に入れてください。
           </p>
+          {detailed && (
+            <details style={{ marginBottom: 10 }}>
+              <summary className="muted" style={{ fontSize: 12, cursor: 'pointer' }}>計算の内訳を表示</summary>
+              <div style={{ fontSize: 12, marginTop: 6 }}>
+                <div className="kv"><span className="muted">給与所得（収入−給与所得控除）</span><span>{yen(detailed.breakdown.shotoku)}</span></div>
+                <div className="kv"><span className="muted">社会保険料控除</span><span>{yen(detailed.breakdown.social)}</span></div>
+                {detailed.breakdown.life.it > 0 && (
+                  <div className="kv"><span className="muted">生命保険料控除（所得税/住民税）</span><span>{yen(detailed.breakdown.life.it)} / {yen(detailed.breakdown.life.rt)}</span></div>
+                )}
+                {detailed.breakdown.quake.it > 0 && (
+                  <div className="kv"><span className="muted">地震保険料控除（所得税/住民税）</span><span>{yen(detailed.breakdown.quake.it)} / {yen(detailed.breakdown.quake.rt)}</span></div>
+                )}
+                {detailed.breakdown.medical > 0 && (
+                  <div className="kv"><span className="muted">医療費控除</span><span>{yen(detailed.breakdown.medical)}</span></div>
+                )}
+                {detailed.breakdown.spouse.it > 0 && (
+                  <div className="kv"><span className="muted">配偶者控除（所得税/住民税）</span><span>{yen(detailed.breakdown.spouse.it)} / {yen(detailed.breakdown.spouse.rt)}</span></div>
+                )}
+                {detailed.breakdown.dependents.map((d, i) => (
+                  <div className="kv" key={i}><span className="muted">扶養控除 {d.age}歳（{d.label}）</span><span>{d.it > 0 ? `${yen(d.it)} / ${yen(d.rt)}` : '0円'}</span></div>
+                ))}
+                <div className="kv"><span className="muted">課税所得（所得税/住民税）</span><span>{yen(detailed.breakdown.taxableIT)} / {yen(detailed.breakdown.taxableRT)}</span></div>
+                <div className="kv"><span className="muted">所得税額（税率{Math.round(detailed.breakdown.rate * 100)}%）</span><span>{yen(detailed.breakdown.incomeTax)}</span></div>
+                <div className="kv"><span className="muted">住民税所得割</span><span>{yen(detailed.breakdown.residentTax)}</span></div>
+                {detailed.breakdown.loanResident > 0 && (
+                  <div className="kv"><span className="muted">住宅ローン控除（住民税側）</span><span className="neg">−{yen(detailed.breakdown.loanResident)}</span></div>
+                )}
+              </div>
+            </details>
+          )}
           <button className="btn" onClick={() => void saveYear()} disabled={saving}>{saving ? '保存中…' : '上限情報を保存'}</button>
         </details>
       </div>
+
+      <ProfileCard persons={persons} year={year} profile={profile} />
+
+
 
       <SalaryCard
         person={person}

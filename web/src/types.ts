@@ -73,6 +73,17 @@ export interface FurusatoYear {
   memo: string | null
   bonus_base: number | null // ボーナス基準月額
   bonus_config: string | null // BonusConfig の JSON文字列
+  life_paid: number | null // 生命保険料の年間支払額
+  quake_paid: number | null // 地震保険料の年間支払額
+  medical_paid: number | null // 医療費の年間支払額
+}
+
+/** 世帯で1つの控除プロフィール（settings の furusato_profile にJSON保存） */
+export interface FurusatoProfile {
+  head_person: string | null // 世帯主。家族系控除（配偶者・扶養・住宅ローン）はこの管理者にのみ適用
+  spouse: boolean // 配偶者控除
+  dependents: Array<{ birth_year: number }> // 扶養家族（生年で持ち、対象年ごとに区分を自動判定）
+  housing_loan: { enabled: boolean; annual_deduction: number | null }
 }
 
 export interface FurusatoSalary {

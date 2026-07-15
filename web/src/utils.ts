@@ -1,4 +1,4 @@
-import type { AssetRow, BonusConfig, ExpenseRow, FixedCostRow, FurusatoSalary, IncomeRow } from './types'
+import type { AssetRow, BonusConfig, ExpenseRow, FixedCostRow, FurusatoProfile, FurusatoSalary, IncomeRow } from './types'
 
 export const yen = (v: number | null | undefined) =>
   v === null || v === undefined ? '−' : `${Math.round(v).toLocaleString('ja-JP')}円`
@@ -54,42 +54,127 @@ export function incomeByMonth(income: IncomeRow[]): Map<string, number> {
   return map
 }
 
+// ================================================================ ふるさと納税 上限計算
+
+/** 給与所得控除（令和2年〜） */
+export function salaryIncomeDeduction(income: number): number {
+  if (income <= 1_625_000) return 550_000
+  if (income <= 1_800_000) return income * 0.4 - 100_000
+  if (income <= 3_600_000) return income * 0.3 + 80_000
+  if (income <= 6_600_000) return income * 0.2 + 440_000
+  if (income <= 8_500_000) return income * 0.1 + 1_100_000
+  return 1_950_000
+}
+
+/** 所得税の速算表（復興特別所得税を除く本税）。rate はふるさと特例式にも使用 */
+export function incomeTaxOf(taxable: number): { tax: number; rate: number } {
+  const t = Math.max(0, taxable)
+  if (t <= 1_950_000) return { tax: t * 0.05, rate: 0.05 }
+  if (t <= 3_300_000) return { tax: t * 0.1 - 97_500, rate: 0.1 }
+  if (t <= 6_950_000) return { tax: t * 0.2 - 427_500, rate: 0.2 }
+  if (t <= 9_000_000) return { tax: t * 0.23 - 636_000, rate: 0.23 }
+  if (t <= 18_000_000) return { tax: t * 0.33 - 1_536_000, rate: 0.33 }
+  if (t <= 40_000_000) return { tax: t * 0.4 - 2_796_000, rate: 0.4 }
+  return { tax: t * 0.45 - 4_796_000, rate: 0.45 }
+}
+
+/** 生命保険料控除（新制度・一般生命保険のみの簡易計算）: 所得税側(it)/住民税側(rt) */
+export function lifeInsuranceDeduction(paid: number): { it: number; rt: number } {
+  const it = paid <= 20_000 ? paid : paid <= 40_000 ? paid / 2 + 10_000 : paid <= 80_000 ? paid / 4 + 20_000 : 40_000
+  const rt = paid <= 12_000 ? paid : paid <= 32_000 ? paid / 2 + 6_000 : paid <= 56_000 ? paid / 4 + 14_000 : 28_000
+  return { it, rt }
+}
+
+/** 地震保険料控除: 所得税側 min(支払, 5万) / 住民税側 min(支払/2, 2.5万) */
+export function quakeInsuranceDeduction(paid: number): { it: number; rt: number } {
+  return { it: Math.min(paid, 50_000), rt: Math.min(paid / 2, 25_000) }
+}
+
+/** 扶養控除（対象年12/31時点の年齢で判定） */
+export function dependentDeduction(age: number): { it: number; rt: number; label: string } {
+  if (age < 16) return { it: 0, rt: 0, label: '対象外(16歳未満)' }
+  if (age <= 18) return { it: 380_000, rt: 330_000, label: '一般' }
+  if (age <= 22) return { it: 630_000, rt: 450_000, label: '特定' }
+  if (age < 70) return { it: 380_000, rt: 330_000, label: '一般' }
+  return { it: 480_000, rt: 380_000, label: '老人' }
+}
+
+export interface FurusatoLimitInputs {
+  income: number | null // 年収（給与）
+  social: number | null // 社会保険料（年額）
+  lifePaid?: number | null // 生命保険料 支払額
+  quakePaid?: number | null // 地震保険料 支払額
+  medicalPaid?: number | null // 医療費 支払額
+  medicalDeductionOverride?: number | null // 医療費控除額の直接指定（支払額より優先）
+  spouse?: boolean // 配偶者控除（世帯主のみ）
+  dependentAges?: number[] // 扶養家族の年齢（世帯主のみ）
+  loanAnnualDeduction?: number | null // 住宅ローン控除の年間控除額（世帯主のみ）
+}
+
+export interface FurusatoLimitBreakdown {
+  salaryDeduction: number
+  shotoku: number
+  social: number
+  life: { it: number; rt: number }
+  quake: { it: number; rt: number }
+  medical: number
+  spouse: { it: number; rt: number }
+  dependents: Array<{ age: number; label: string; it: number; rt: number }>
+  taxableIT: number
+  taxableRT: number
+  incomeTax: number
+  rate: number
+  residentTax: number
+  loanResident: number
+  residentTaxAfterLoan: number
+}
+
 /**
- * ふるさと納税の年間上限額（簡易計算・目安）
+ * ふるさと納税の年間上限額（詳細版・目安）
  * 総務省の標準式: 上限 = 住民税所得割 × 20% ÷ (90% − 所得税率 × 1.021) + 2000円
- * 給与収入のみ・独身/共働き（配偶者控除なし）を想定した概算。千円未満切り捨て。
+ * 簡易化: 生命保険料控除は新制度・一般区分のみ / 配偶者特別控除・老人同居加算・調整控除は省略。千円未満切り捨て。
  */
+export function furusatoLimitDetailed(inp: FurusatoLimitInputs): { limit: number; breakdown: FurusatoLimitBreakdown } | null {
+  if (!inp.income || inp.income <= 0) return null
+  const social = inp.social ?? 0
+  const salaryDeduction = salaryIncomeDeduction(inp.income)
+  const shotoku = inp.income - salaryDeduction
+
+  const life = inp.lifePaid ? lifeInsuranceDeduction(inp.lifePaid) : { it: 0, rt: 0 }
+  const quake = inp.quakePaid ? quakeInsuranceDeduction(inp.quakePaid) : { it: 0, rt: 0 }
+  const medical =
+    inp.medicalDeductionOverride ??
+    (inp.medicalPaid ? Math.max(0, inp.medicalPaid - Math.min(100_000, shotoku * 0.05)) : 0)
+  const spouse = inp.spouse ? { it: 380_000, rt: 330_000 } : { it: 0, rt: 0 }
+  const dependents = (inp.dependentAges ?? []).map((age) => ({ age, ...dependentDeduction(age) }))
+  const depIT = dependents.reduce((s, d) => s + d.it, 0)
+  const depRT = dependents.reduce((s, d) => s + d.rt, 0)
+
+  const taxableIT = Math.max(0, shotoku - social - life.it - quake.it - medical - spouse.it - depIT - 480_000)
+  const taxableRT = Math.max(0, shotoku - social - life.rt - quake.rt - medical - spouse.rt - depRT - 430_000)
+
+  const { tax: incomeTax, rate } = incomeTaxOf(taxableIT)
+  const residentTax = taxableRT * 0.1
+
+  // 住宅ローン控除: 所得税から引き切れない分が住民税から控除（上限 課税所得×7% / 136,500円）→ 所得割が減り上限も下がる
+  const loanResident = inp.loanAnnualDeduction
+    ? Math.min(Math.max(0, inp.loanAnnualDeduction - incomeTax), Math.min(taxableIT * 0.07, 136_500))
+    : 0
+  const residentTaxAfterLoan = Math.max(0, residentTax - loanResident)
+
+  const limit = Math.floor(((residentTaxAfterLoan * 0.2) / (0.9 - rate * 1.021) + 2000) / 1000) * 1000
+  return {
+    limit,
+    breakdown: {
+      salaryDeduction, shotoku, social, life, quake, medical, spouse, dependents,
+      taxableIT, taxableRT, incomeTax, rate, residentTax, loanResident, residentTaxAfterLoan,
+    },
+  }
+}
+
+/** 旧シグネチャ互換（年収・社保・医療費控除のみの簡易版） */
 export function furusatoLimit(income: number | null, socialInsurance: number | null, medicalDeduction: number | null): number | null {
-  if (!income || income <= 0) return null
-  const social = socialInsurance ?? 0
-  const medical = medicalDeduction ?? 0
-
-  // 給与所得控除（令和2年〜）
-  let salaryDeduction: number
-  if (income <= 1_625_000) salaryDeduction = 550_000
-  else if (income <= 1_800_000) salaryDeduction = income * 0.4 - 100_000
-  else if (income <= 3_600_000) salaryDeduction = income * 0.3 + 80_000
-  else if (income <= 6_600_000) salaryDeduction = income * 0.2 + 440_000
-  else if (income <= 8_500_000) salaryDeduction = income * 0.1 + 1_100_000
-  else salaryDeduction = 1_950_000
-
-  const shotoku = income - salaryDeduction
-  const taxableResident = Math.max(0, shotoku - social - medical - 430_000) // 住民税: 基礎控除43万
-  const taxableIncomeTax = Math.max(0, shotoku - social - medical - 480_000) // 所得税: 基礎控除48万
-
-  // 所得税率（復興特別所得税は式内の1.021で考慮）
-  let rate: number
-  if (taxableIncomeTax <= 1_950_000) rate = 0.05
-  else if (taxableIncomeTax <= 3_300_000) rate = 0.1
-  else if (taxableIncomeTax <= 6_950_000) rate = 0.2
-  else if (taxableIncomeTax <= 9_000_000) rate = 0.23
-  else if (taxableIncomeTax <= 18_000_000) rate = 0.33
-  else if (taxableIncomeTax <= 40_000_000) rate = 0.4
-  else rate = 0.45
-
-  const residentTax = taxableResident * 0.1
-  const limit = (residentTax * 0.2) / (0.9 - rate * 1.021) + 2000
-  return Math.floor(limit / 1000) * 1000
+  return furusatoLimitDetailed({ income, social: socialInsurance, medicalDeductionOverride: medicalDeduction ?? 0 })?.limit ?? null
 }
 
 export interface SalaryEstimate {
@@ -103,6 +188,31 @@ export interface SalaryEstimate {
   avgGross: number
   enteredMonths: number
   usedAvgAsBonusBase: boolean // 基準月額未入力で平均総支給を代用した
+}
+
+export const EMPTY_PROFILE: FurusatoProfile = {
+  head_person: null,
+  spouse: false,
+  dependents: [],
+  housing_loan: { enabled: false, annual_deduction: null },
+}
+
+export function parseProfile(json: string | null | undefined): FurusatoProfile {
+  if (!json) return EMPTY_PROFILE
+  try {
+    const v = JSON.parse(json) as Partial<FurusatoProfile>
+    return {
+      head_person: v.head_person ?? null,
+      spouse: !!v.spouse,
+      dependents: Array.isArray(v.dependents) ? v.dependents.filter((d) => d && typeof d.birth_year === 'number') : [],
+      housing_loan: {
+        enabled: !!v.housing_loan?.enabled,
+        annual_deduction: v.housing_loan?.annual_deduction ?? null,
+      },
+    }
+  } catch {
+    return EMPTY_PROFILE
+  }
 }
 
 export function parseBonusConfig(json: string | null | undefined): BonusConfig {

@@ -19,7 +19,7 @@ var SHEET_DEFS = {
   zaim_net: ['month', 'amount'],
   furusato_items: ['id', 'person', 'year', 'name', 'price', 'municipality', 'url', 'application_status', 'application_method', 'receipt_status', 'memo'],
   // 注: 新列は必ず末尾に追加する（既存シートのデータ列とズレるため）
-  furusato_years: ['person', 'year', 'income', 'social_insurance', 'medical_deduction', 'limit_manual', 'memo', 'bonus_base', 'bonus_config'],
+  furusato_years: ['person', 'year', 'income', 'social_insurance', 'medical_deduction', 'limit_manual', 'memo', 'bonus_base', 'bonus_config', 'life_paid', 'quake_paid', 'medical_paid'],
   furusato_salaries: ['person', 'year', 'month', 'gross', 'health', 'pension_ins', 'employment', 'income_tax', 'resident_tax'],
   memos: ['id', 'text', 'updated_at'],
   settings: ['key', 'value'],

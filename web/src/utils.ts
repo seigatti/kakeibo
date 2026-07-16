@@ -73,11 +73,42 @@ export interface MonthEndSnapshot {
   profit: number | null
 }
 
-/** 各月の「月末時点」（＝その月内で最後の資産スナップショット）の資産合計と評価損益 */
+/** スナップショットをどの「月末」の値として扱うか。日が5以下なら前月末とみなす（月初転記の運用に対応） */
+export function snapshotBucket(date: string): string {
+  const day = Number(date.slice(8, 10))
+  const month = date.slice(0, 7)
+  return day <= 5 ? addMonths(month, -1) : month
+}
+
+/**
+ * 各月の「月末時点」の資産合計と評価損益。
+ * - 日が5以下の記録は前月末の値として扱う（例: 7/1の記録 = 6月末）
+ * - 投資・現金・年金は項目ごとに「最後に記録された値」で合成（MF用とZaim用の
+ *   ブックマークレットを別の日にタップしても総資産が壊れない）
+ * - 評価損益はその月のバケット内に記録がある場合のみ採用（古い値の持ち越しは
+ *   Δ損益を0に見せて投資の値動きがその他支出に混入するため、無い月はnull）
+ */
 export function assetSnapshotByMonthEnd(assets: AssetRow[]): Map<string, MonthEndSnapshot> {
   const map = new Map<string, MonthEndSnapshot>()
+  let inv: number | null = null
+  let cash: number | null = null
+  let pension: number | null = null
+  let profit: number | null = null
+  let profitBucket: string | null = null
   for (const a of sortedAssets(assets)) {
-    map.set(a.date.slice(0, 7), { total: assetTotal(a), profit: a.mf_profit })
+    const m = snapshotBucket(a.date)
+    if (a.investment !== null) inv = a.investment
+    if (a.cash !== null) cash = a.cash
+    if (a.pension !== null) pension = a.pension
+    if (a.mf_profit !== null) {
+      profit = a.mf_profit
+      profitBucket = m
+    }
+    if (inv === null && cash === null && pension === null) continue
+    map.set(m, {
+      total: (inv ?? 0) + (cash ?? 0) + (pension ?? 0),
+      profit: profitBucket === m ? profit : null,
+    })
   }
   return map
 }

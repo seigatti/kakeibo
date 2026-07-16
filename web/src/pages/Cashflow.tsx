@@ -161,8 +161,9 @@ export default function Cashflow() {
                 {'\n'}・変動費: 収支入力（CSVインポート含む）の合計
                 {'\n'}・その他支出（推計）= 収入 − 固定費 − 変動費 − 非投資の資産増減
                 {'\n'}　非投資の資産増減 = Δ総資産 − Δ評価損益（投資の値動き分を排除。積立などの資産間移動は支出になりません）
-                {'\n'}・その他支出が負になる月（未把握の収入や記録誤差）は0として表示
-                {'\n'}・当月末と前月末の両方に資産スナップショット＋評価損益の記録がある月だけ「その他」を算出できます（記録タイミングによって前後の月に多少ずれます）
+                {'\n'}・その他支出が負になる月（未把握の収入や記録誤差）は0として表示、算出できない月はバー自体を表示しません
+                {'\n'}・「月末の資産」は記録から自動判定します: 日付が5日以内の記録は前月末の値とみなします（例: 7/1の記録=6月末）。投資（マネフォ）と現金（Zaim）の記録日が別でも、項目ごとに最後の値で合成するので大丈夫です
+                {'\n'}・当月末と前月末の両方に資産記録があり、評価損益（MFブックマークレットで自動記録）が両方の月にあることが算出の条件です
               </HelpTip>
             </h2>
             <div className="chart-box">
@@ -174,7 +175,16 @@ export default function Cashflow() {
                     { type: 'bar' as const, label: '収入', data: chartMonths.map((m) => incMap.get(m) ?? 0), backgroundColor: '#4ade80', stack: 'in' },
                     { type: 'bar' as const, label: '固定費', data: chartMonths.map((m) => -fixedOf(m)), backgroundColor: '#fb923c', stack: 'out' },
                     { type: 'bar' as const, label: '変動費', data: chartMonths.map((m) => -(expMap.get(m) ?? 0)), backgroundColor: '#f87171', stack: 'out' },
-                    { type: 'bar' as const, label: 'その他支出(推計)', data: chartMonths.map((m) => -(otherOf(m) ?? 0)), backgroundColor: '#c084fc', stack: 'out' },
+                    {
+                      type: 'bar' as const,
+                      label: 'その他支出(推計)',
+                      data: chartMonths.map((m) => {
+                        const o = otherOf(m)
+                        return o === null ? null : -o // 算出不能月は0ではなく非表示
+                      }),
+                      backgroundColor: '#c084fc',
+                      stack: 'out',
+                    },
                     {
                       type: 'line' as const,
                       label: '収支',
@@ -193,7 +203,8 @@ export default function Cashflow() {
               />
             </div>
             <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
-              ※「その他支出」が表示されない月は、資産記録（スナップショット＋評価損益）が月末前後に揃っていない月です。
+              ※その他支出を算出できた月: {chartMonths.filter((m) => otherOf(m) !== null).length}/{chartMonths.length}。
+              算出には前月末と当月末の資産記録（投資・現金）と評価損益が必要です。
               給料が未入力の月は給与データの手取りを収入として表示します（手入力が優先）
             </p>
           </div>

@@ -69,8 +69,11 @@ export function incomeByMonth(income: IncomeRow[]): Map<string, number> {
 }
 
 export interface MonthEndSnapshot {
+  invest: number | null
+  cash: number | null
+  pension: number | null
+  profit: number | null // その月のバケット内に記録があった場合のみ（鮮度必須）
   total: number
-  profit: number | null
 }
 
 /** スナップショットをどの「月末」の値として扱うか。日が5以下なら前月末とみなす（月初転記の運用に対応） */
@@ -106,26 +109,57 @@ export function assetSnapshotByMonthEnd(assets: AssetRow[]): Map<string, MonthEn
     }
     if (inv === null && cash === null && pension === null) continue
     map.set(m, {
-      total: (inv ?? 0) + (cash ?? 0) + (pension ?? 0),
+      invest: inv,
+      cash,
+      pension,
       profit: profitBucket === m ? profit : null,
+      total: (inv ?? 0) + (cash ?? 0) + (pension ?? 0),
     })
   }
   return map
 }
 
+export interface NonInvestBreakdown {
+  dCash: number
+  dInvest: number
+  dProfit: number
+  dPrincipal: number // Δ投資元本 = Δ投資 − Δ評価損益（積立入金や売却の純額）
+  dPension: number | null
+  delta: number // 非投資の資産増減 = Δ現金 + Δ投資元本（年金は値動き・拠出とも除外）
+}
+
 /**
- * 非投資の資産増減(月) = Δ総資産 − Δ評価損益（投資の値動き分を排除した実際の資産の増減）。
- * 当月末・前月末の両方にスナップショットがあり、両方で評価損益が記録されている月のみ算出。
+ * 非投資の資産増減の内訳（月別）。
+ * - 非投資増減 = Δ現金 + Δ投資元本（投資元本 = 投資評価額 − 評価損益）
+ * - 年金は値動きが評価損益に含まれず、拠出も給与天引き（手取り外）のため計算から除外
+ * - 当月末・前月末の両方に現金・投資の記録があり、両方の月に評価損益の記録がある月のみ算出
  */
-export function nonInvestDeltaByMonth(assets: AssetRow[]): Map<string, number> {
+export function nonInvestBreakdownByMonth(assets: AssetRow[]): Map<string, NonInvestBreakdown> {
   const snap = assetSnapshotByMonthEnd(assets)
-  const out = new Map<string, number>()
+  const out = new Map<string, NonInvestBreakdown>()
   for (const [m, cur] of snap) {
     const prev = snap.get(addMonths(m, -1))
     if (!prev || cur.profit === null || prev.profit === null) continue
-    out.set(m, cur.total - prev.total - (cur.profit - prev.profit))
+    if (cur.cash === null || prev.cash === null || cur.invest === null || prev.invest === null) continue
+    const dCash = cur.cash - prev.cash
+    const dInvest = cur.invest - prev.invest
+    const dProfit = cur.profit - prev.profit
+    const dPrincipal = dInvest - dProfit
+    out.set(m, {
+      dCash,
+      dInvest,
+      dProfit,
+      dPrincipal,
+      dPension: cur.pension !== null && prev.pension !== null ? cur.pension - prev.pension : null,
+      delta: dCash + dPrincipal,
+    })
   }
   return out
+}
+
+/** 非投資の資産増減(月) = Δ現金 + Δ投資元本（詳細は nonInvestBreakdownByMonth 参照） */
+export function nonInvestDeltaByMonth(assets: AssetRow[]): Map<string, number> {
+  return new Map([...nonInvestBreakdownByMonth(assets)].map(([m, b]) => [m, b.delta]))
 }
 
 /**

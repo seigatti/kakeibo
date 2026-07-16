@@ -4,7 +4,7 @@ import { useStore } from '../store'
 import { DEFAULT_CATEGORIES } from '../types'
 import HelpTip from '../components/HelpTip'
 import { DEFAULT_PERSONS } from '../types'
-import { addMonths, amt, dataMonthRange, effectiveIncomeByMonth, estimateOtherExpense, expenseByMonth, fixedMonthlyTotal, netSalaryByMonth, nonInvestDeltaByMonth, thisMonth, yen, yenShort } from '../utils'
+import { addMonths, amt, dataMonthRange, effectiveIncomeByMonth, estimateOtherExpense, expenseByMonth, fixedMonthlyTotal, netSalaryByMonth, nonInvestBreakdownByMonth, thisMonth, yen, yenShort } from '../utils'
 import CsvImportCard from './CsvImportCard'
 import SalaryCard from './SalaryCard'
 
@@ -91,10 +91,10 @@ export default function Cashflow() {
     return byCat
   }, [data])
 
-  // その他支出の推計: 収入 − 固定費 − 変動費 − 非投資の資産増減（Δ総資産−Δ評価損益）
-  const nonInvest = useMemo(() => nonInvestDeltaByMonth(data?.assets ?? []), [data])
+  // その他支出の推計: 収入 − 固定費 − 変動費 − 非投資の資産増減（Δ現金＋Δ投資元本。年金は除外）
+  const breakdown = useMemo(() => nonInvestBreakdownByMonth(data?.assets ?? []), [data])
   const otherOf = (m: string) =>
-    estimateOtherExpense(incMap.get(m) ?? 0, fixedOf(m), expMap.get(m) ?? 0, nonInvest.get(m))
+    estimateOtherExpense(incMap.get(m) ?? 0, fixedOf(m), expMap.get(m) ?? 0, breakdown.get(m)?.delta)
 
   const total = (m: string) => (expMap.get(m) ?? 0) + fixedOf(m) + (otherOf(m) ?? 0)
 
@@ -160,7 +160,9 @@ export default function Cashflow() {
                 {'\n'}・固定費: 固定費タブの月割り額
                 {'\n'}・変動費: 収支入力（CSVインポート含む）の合計
                 {'\n'}・その他支出（推計）= 収入 − 固定費 − 変動費 − 非投資の資産増減
-                {'\n'}　非投資の資産増減 = Δ総資産 − Δ評価損益（投資の値動き分を排除。積立などの資産間移動は支出になりません）
+                {'\n'}　非投資の資産増減 = Δ現金 + Δ投資元本（投資元本 = 投資評価額 − 評価損益。投資の値動きを排除し、積立などの資産間移動は支出になりません）
+                {'\n'}・年金は値動きが評価損益に含まれず、拠出も給与天引き（手取り外）のため計算から除外しています
+                {'\n'}・投資を売却した月は評価損益がリセットされるため、Δ評価損益＝値動きが成り立たずズレることがあります（下の内訳表で確認できます）
                 {'\n'}・その他支出が負になる月（未把握の収入や記録誤差）は0として表示、算出できない月はバー自体を表示しません
                 {'\n'}・「月末の資産」は記録から自動判定します: 日付が5日以内の記録は前月末の値とみなします（例: 7/1の記録=6月末）。投資（マネフォ）と現金（Zaim）の記録日が別でも、項目ごとに最後の値で合成するので大丈夫です
                 {'\n'}・当月末と前月末の両方に資産記録があり、評価損益（MFブックマークレットで自動記録）が両方の月にあることが算出の条件です
@@ -207,6 +209,51 @@ export default function Cashflow() {
               算出には前月末と当月末の資産記録（投資・現金）と評価損益が必要です。
               給料が未入力の月は給与データの手取りを収入として表示します（手入力が優先）
             </p>
+            <details style={{ marginTop: 8 }}>
+              <summary className="muted" style={{ fontSize: 13, cursor: 'pointer' }}>その他支出の内訳（診断用）</summary>
+              <div style={{ overflowX: 'auto', marginTop: 6 }}>
+                <table style={{ fontSize: 11, borderCollapse: 'collapse', whiteSpace: 'nowrap', width: '100%' }}>
+                  <thead>
+                    <tr className="muted">
+                      <th style={{ padding: 3, textAlign: 'left' }}>月</th>
+                      <th style={{ padding: 3, textAlign: 'right' }}>Δ現金</th>
+                      <th style={{ padding: 3, textAlign: 'right' }}>Δ投資</th>
+                      <th style={{ padding: 3, textAlign: 'right' }}>Δ評価損益</th>
+                      <th style={{ padding: 3, textAlign: 'right' }}>Δ投資元本</th>
+                      <th style={{ padding: 3, textAlign: 'right' }}>収入</th>
+                      <th style={{ padding: 3, textAlign: 'right' }}>固定+変動</th>
+                      <th style={{ padding: 3, textAlign: 'right' }}>その他支出</th>
+                      <th style={{ padding: 3 }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {chartMonths.filter((m) => breakdown.has(m)).map((m) => {
+                      const b = breakdown.get(m)!
+                      const income = incMap.get(m) ?? 0
+                      const suspicious = income > 0 && Math.abs(b.dPrincipal) > income * 1.5
+                      return (
+                        <tr key={m} style={{ borderTop: '1px solid var(--border)' }}>
+                          <td style={{ padding: 3 }}>{m.slice(2)}</td>
+                          <td style={{ padding: 3, textAlign: 'right' }}>{yenShort(b.dCash)}</td>
+                          <td style={{ padding: 3, textAlign: 'right' }}>{yenShort(b.dInvest)}</td>
+                          <td style={{ padding: 3, textAlign: 'right' }}>{yenShort(b.dProfit)}</td>
+                          <td style={{ padding: 3, textAlign: 'right' }} className={suspicious ? 'neg' : ''}>{yenShort(b.dPrincipal)}</td>
+                          <td style={{ padding: 3, textAlign: 'right' }}>{yenShort(income)}</td>
+                          <td style={{ padding: 3, textAlign: 'right' }}>{yenShort(fixedOf(m) + (expMap.get(m) ?? 0))}</td>
+                          <td style={{ padding: 3, textAlign: 'right' }}>{otherOf(m) !== null ? yenShort(otherOf(m)!) : '−'}</td>
+                          <td style={{ padding: 3 }}>{suspicious ? '⚠' : ''}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <p className="muted" style={{ fontSize: 11, margin: '6px 0 0' }}>
+                Δ投資元本 = Δ投資 − Δ評価損益（その月の積立・売却の純額に相当）。
+                ⚠は|Δ投資元本|が収入の1.5倍を超える月で、<b>当月末か前月末の評価損益の記録が実態とズレている可能性</b>があります
+                （資産タブで該当日付の評価損益を確認・修正すると、その他支出も直ります）。投資を売却した月にも出ることがあります。
+              </p>
+            </details>
           </div>
 
           <div className="card">

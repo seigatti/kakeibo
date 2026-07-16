@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Bar, Chart, Line } from 'react-chartjs-2'
+import { Chart, Line } from 'react-chartjs-2'
 import { useStore } from '../store'
 import { DEFAULT_CATEGORIES } from '../types'
 import HelpTip from '../components/HelpTip'
 import { DEFAULT_PERSONS } from '../types'
-import { addMonths, amt, dataMonthRange, effectiveIncomeByMonth, expenseByMonth, fixedMonthlyTotal, netSalaryByMonth, thisMonth, yen, yenShort } from '../utils'
+import { addMonths, amt, dataMonthRange, effectiveIncomeByMonth, estimateOtherExpense, expenseByMonth, fixedMonthlyTotal, netSalaryByMonth, nonInvestDeltaByMonth, thisMonth, yen, yenShort } from '../utils'
 import CsvImportCard from './CsvImportCard'
 import SalaryCard from './SalaryCard'
 
@@ -91,7 +91,12 @@ export default function Cashflow() {
     return byCat
   }, [data])
 
-  const total = (m: string) => (expMap.get(m) ?? 0) + fixedOf(m)
+  // その他支出の推計: 収入 − 固定費 − 変動費 − 非投資の資産増減（Δ総資産−Δ評価損益）
+  const nonInvest = useMemo(() => nonInvestDeltaByMonth(data?.assets ?? []), [data])
+  const otherOf = (m: string) =>
+    estimateOtherExpense(incMap.get(m) ?? 0, fixedOf(m), expMap.get(m) ?? 0, nonInvest.get(m))
+
+  const total = (m: string) => (expMap.get(m) ?? 0) + fixedOf(m) + (otherOf(m) ?? 0)
 
   return (
     <>
@@ -148,33 +153,48 @@ export default function Cashflow() {
       {chartMonths.length >= 2 && (
         <>
           <div className="card">
-            <h2>収入 vs 支出（変動費＋固定費月割り）</h2>
+            <h2>
+              収入 vs 全支出（投資除く）
+              <HelpTip title="全支出の内訳と算出式">
+                支出は3つに分けて積み上げ表示します。
+                {'\n'}・固定費: 固定費タブの月割り額
+                {'\n'}・変動費: 収支入力（CSVインポート含む）の合計
+                {'\n'}・その他支出（推計）= 収入 − 固定費 − 変動費 − 非投資の資産増減
+                {'\n'}　非投資の資産増減 = Δ総資産 − Δ評価損益（投資の値動き分を排除。積立などの資産間移動は支出になりません）
+                {'\n'}・その他支出が負になる月（未把握の収入や記録誤差）は0として表示
+                {'\n'}・当月末と前月末の両方に資産スナップショット＋評価損益の記録がある月だけ「その他」を算出できます（記録タイミングによって前後の月に多少ずれます）
+              </HelpTip>
+            </h2>
             <div className="chart-box">
               <Chart
                 type="bar"
                 data={{
                   labels: chartMonths.map((m) => m.slice(2)),
                   datasets: [
-                    { type: 'bar' as const, label: '収入', data: chartMonths.map((m) => incMap.get(m) ?? 0), backgroundColor: '#4ade80' },
-                    { type: 'bar' as const, label: '支出', data: chartMonths.map((m) => -total(m)), backgroundColor: '#f87171' },
+                    { type: 'bar' as const, label: '収入', data: chartMonths.map((m) => incMap.get(m) ?? 0), backgroundColor: '#4ade80', stack: 'in' },
+                    { type: 'bar' as const, label: '固定費', data: chartMonths.map((m) => -fixedOf(m)), backgroundColor: '#fb923c', stack: 'out' },
+                    { type: 'bar' as const, label: '変動費', data: chartMonths.map((m) => -(expMap.get(m) ?? 0)), backgroundColor: '#f87171', stack: 'out' },
+                    { type: 'bar' as const, label: 'その他支出(推計)', data: chartMonths.map((m) => -(otherOf(m) ?? 0)), backgroundColor: '#c084fc', stack: 'out' },
                     {
                       type: 'line' as const,
                       label: '収支',
                       data: chartMonths.map((m) => (incMap.get(m) ?? 0) - total(m)),
                       borderColor: '#38bdf8',
                       tension: 0.3,
+                      stack: 'balance',
                     },
                   ],
                 }}
                 options={{
                   maintainAspectRatio: false,
                   interaction: { mode: 'index', intersect: false },
-                  scales: { y: { ticks: { callback: (v) => yenShort(Number(v)) } } },
+                  scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: (v) => yenShort(Number(v)) } } },
                 }}
               />
             </div>
             <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
-              ※給料が未入力の月は、ふるさとタブの給与データの手取り（総支給−控除合計）を収入として表示します（手入力が優先。控除が未入力の月は総支給がそのまま使われます）
+              ※「その他支出」が表示されない月は、資産記録（スナップショット＋評価損益）が月末前後に揃っていない月です。
+              給料が未入力の月は給与データの手取りを収入として表示します（手入力が優先）
             </p>
           </div>
 
@@ -203,15 +223,25 @@ export default function Cashflow() {
 
           {(data?.zaim_net.length ?? 0) >= 2 && (
             <div className="card">
-              <h2>実収支（Zaim転記・投資除く）</h2>
+              <h2>
+                現金収支の推移（Zaim転記・過去データ）
+                <HelpTip title="このグラフについて">
+                  Excel時代にZaimの「分析＞月ごと」から転記していた現金ベースの月次収支（投資除く）の記録です。
+                  移行した過去データ（2023-09〜2024-08）のみで、現在は更新されません。
+                  現在の全体像は上の「収入 vs 全支出（投資除く）」で確認できます。
+                </HelpTip>
+              </h2>
               <div className="chart-box small">
-                <Bar
+                <Line
                   data={{
                     labels: data!.zaim_net.map((z) => z.month.slice(2)),
                     datasets: [{
-                      label: '実収支',
+                      label: '現金収支',
                       data: data!.zaim_net.map((z) => z.amount),
-                      backgroundColor: data!.zaim_net.map((z) => (z.amount >= 0 ? '#4ade80' : '#f87171')),
+                      borderColor: '#38bdf8',
+                      backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                      fill: true,
+                      tension: 0.3,
                     }],
                   }}
                   options={{

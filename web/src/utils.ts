@@ -68,6 +68,49 @@ export function incomeByMonth(income: IncomeRow[]): Map<string, number> {
   return map
 }
 
+export interface MonthEndSnapshot {
+  total: number
+  profit: number | null
+}
+
+/** 各月の「月末時点」（＝その月内で最後の資産スナップショット）の資産合計と評価損益 */
+export function assetSnapshotByMonthEnd(assets: AssetRow[]): Map<string, MonthEndSnapshot> {
+  const map = new Map<string, MonthEndSnapshot>()
+  for (const a of sortedAssets(assets)) {
+    map.set(a.date.slice(0, 7), { total: assetTotal(a), profit: a.mf_profit })
+  }
+  return map
+}
+
+/**
+ * 非投資の資産増減(月) = Δ総資産 − Δ評価損益（投資の値動き分を排除した実際の資産の増減）。
+ * 当月末・前月末の両方にスナップショットがあり、両方で評価損益が記録されている月のみ算出。
+ */
+export function nonInvestDeltaByMonth(assets: AssetRow[]): Map<string, number> {
+  const snap = assetSnapshotByMonthEnd(assets)
+  const out = new Map<string, number>()
+  for (const [m, cur] of snap) {
+    const prev = snap.get(addMonths(m, -1))
+    if (!prev || cur.profit === null || prev.profit === null) continue
+    out.set(m, cur.total - prev.total - (cur.profit - prev.profit))
+  }
+  return out
+}
+
+/**
+ * その他支出の推計(月) = 収入 − 固定費 − 変動費 − 非投資の資産増減。
+ * 負（未把握の収入や記録誤差）は0に切り上げ。算出できない月は null。
+ */
+export function estimateOtherExpense(
+  income: number,
+  fixed: number,
+  variable: number,
+  nonInvestDelta: number | undefined,
+): number | null {
+  if (nonInvestDelta === undefined) return null
+  return Math.max(0, Math.round(income - fixed - variable - nonInvestDelta))
+}
+
 /** ふるさとの月次給与から月ごとの世帯手取り（総支給−控除合計。全員分合算） */
 export function netSalaryByMonth(salaries: FurusatoSalary[]): Map<string, number> {
   const map = new Map<string, number>()

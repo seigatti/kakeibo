@@ -4,7 +4,7 @@ import { useStore } from '../store'
 import { DEFAULT_CATEGORIES } from '../types'
 import HelpTip from '../components/HelpTip'
 import { DEFAULT_PERSONS } from '../types'
-import { addMonths, amt, dataMonthRange, effectiveIncomeByMonth, estimateOtherExpense, expenseByMonth, fixedMonthlyTotal, netSalaryByMonth, nonInvestBreakdownByMonth, thisMonth, yen, yenShort } from '../utils'
+import { addMonths, amt, dataMonthRange, DEFAULT_PRINCIPAL_CAP, effectiveIncomeByMonth, estimateOtherExpense, expenseByMonth, fixedMonthlyTotal, netSalaryByMonth, nonInvestBreakdownByMonth, thisMonth, yen, yenShort } from '../utils'
 import CsvImportCard from './CsvImportCard'
 import SalaryCard from './SalaryCard'
 
@@ -92,7 +92,14 @@ export default function Cashflow() {
   }, [data])
 
   // その他支出の推計: 収入 − 固定費 − 変動費 − 非投資の資産増減（Δ現金＋Δ投資元本。年金は除外）
-  const breakdown = useMemo(() => nonInvestBreakdownByMonth(data?.assets ?? []), [data])
+  // |Δ投資元本| がしきい値を超える月は売買とみなし Δ元本を除外（設定 principal_cap で変更可）
+  const principalCap = useMemo(() => {
+    const raw = data?.settings.find((s) => s.key === 'principal_cap')?.value
+    const n = raw ? Number(raw) : NaN
+    return Number.isFinite(n) && n > 0 ? n : DEFAULT_PRINCIPAL_CAP
+  }, [data])
+  const [capInput, setCapInput] = useState<string | null>(null)
+  const breakdown = useMemo(() => nonInvestBreakdownByMonth(data?.assets ?? [], principalCap), [data, principalCap])
   const otherOf = (m: string) =>
     estimateOtherExpense(incMap.get(m) ?? 0, fixedOf(m), expMap.get(m) ?? 0, breakdown.get(m)?.delta)
 
@@ -162,7 +169,8 @@ export default function Cashflow() {
                 {'\n'}・その他支出（推計）= 収入 − 固定費 − 変動費 − 非投資の資産増減
                 {'\n'}　非投資の資産増減 = Δ現金 + Δ投資元本（投資元本 = 投資評価額 − 評価損益。投資の値動きを排除し、積立などの資産間移動は支出になりません）
                 {'\n'}・年金は値動きが評価損益に含まれず、拠出も給与天引き（手取り外）のため計算から除外しています
-                {'\n'}・投資を売却した月は評価損益がリセットされるため、Δ評価損益＝値動きが成り立たずズレることがあります（下の内訳表で確認できます）
+                {'\n'}・Δ投資元本が売買判定しきい値（既定20万円・内訳表の下で変更可）を超えて<b>マイナス（売却方向）</b>の月は売買（や損益リセット・記録ずれ）とみなし、Δ元本を除外してΔ現金のみで算出します。プラス方向（積立・買付）は現金と相殺されるため除外しません
+                {'\n'}・売買月に通常の積立も同時にあった場合、その積立分は近似としてその他支出に混ざります
                 {'\n'}・その他支出が負になる月（未把握の収入や記録誤差）は0として表示、算出できない月はバー自体を表示しません
                 {'\n'}・「月末の資産」は記録から自動判定します: 日付が5日以内の記録は前月末の値とみなします（例: 7/1の記録=6月末）。投資（マネフォ）と現金（Zaim）の記録日が別でも、項目ごとに最後の値で合成するので大丈夫です
                 {'\n'}・当月末と前月末の両方に資産記録があり、評価損益（MFブックマークレットで自動記録）が両方の月にあることが算出の条件です
@@ -230,18 +238,21 @@ export default function Cashflow() {
                     {chartMonths.filter((m) => breakdown.has(m)).map((m) => {
                       const b = breakdown.get(m)!
                       const income = incMap.get(m) ?? 0
-                      const suspicious = income > 0 && Math.abs(b.dPrincipal) > income * 1.5
+                      const suspicious = !b.tradeExcluded && income > 0 && Math.abs(b.dPrincipal) > income * 1.5
                       return (
                         <tr key={m} style={{ borderTop: '1px solid var(--border)' }}>
                           <td style={{ padding: 3 }}>{m.slice(2)}</td>
                           <td style={{ padding: 3, textAlign: 'right' }}>{yenShort(b.dCash)}</td>
                           <td style={{ padding: 3, textAlign: 'right' }}>{yenShort(b.dInvest)}</td>
                           <td style={{ padding: 3, textAlign: 'right' }}>{yenShort(b.dProfit)}</td>
-                          <td style={{ padding: 3, textAlign: 'right' }} className={suspicious ? 'neg' : ''}>{yenShort(b.dPrincipal)}</td>
+                          <td style={{ padding: 3, textAlign: 'right', textDecoration: b.tradeExcluded ? 'line-through' : undefined }}
+                            className={suspicious ? 'neg' : b.tradeExcluded ? 'muted' : ''}>{yenShort(b.dPrincipal)}</td>
                           <td style={{ padding: 3, textAlign: 'right' }}>{yenShort(income)}</td>
                           <td style={{ padding: 3, textAlign: 'right' }}>{yenShort(fixedOf(m) + (expMap.get(m) ?? 0))}</td>
                           <td style={{ padding: 3, textAlign: 'right' }}>{otherOf(m) !== null ? yenShort(otherOf(m)!) : '−'}</td>
-                          <td style={{ padding: 3 }}>{suspicious ? '⚠' : ''}</td>
+                          <td style={{ padding: 3 }} title={b.tradeExcluded ? '売買とみなしΔ元本を除外済み' : undefined}>
+                            {b.tradeExcluded ? '売買' : suspicious ? '⚠' : ''}
+                          </td>
                         </tr>
                       )
                     })}
@@ -250,8 +261,23 @@ export default function Cashflow() {
               </div>
               <p className="muted" style={{ fontSize: 11, margin: '6px 0 0' }}>
                 Δ投資元本 = Δ投資 − Δ評価損益（その月の積立・売却の純額に相当）。
-                ⚠は|Δ投資元本|が収入の1.5倍を超える月で、<b>当月末か前月末の評価損益の記録が実態とズレている可能性</b>があります
-                （資産タブで該当日付の評価損益を確認・修正すると、その他支出も直ります）。投資を売却した月にも出ることがあります。
+                「売買」= Δ投資元本がしきい値を超えてマイナス（売却方向）のため、売買（や損益リセット・記録ずれ）とみなして<b>Δ元本を除外し Δ現金のみで算出</b>した月（取り消し線）。
+                記録の誤りが原因の場合は、資産タブで該当日付の評価損益を修正すればより正確になります。
+              </p>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'end', marginTop: 8 }}>
+                <label className="field" style={{ marginBottom: 0, flex: 1 }}>売買判定しきい値（Δ元本がこれ超のマイナスで除外）
+                  <input type="text" inputMode="numeric" value={capInput ?? String(principalCap)}
+                    onChange={(e) => setCapInput(e.target.value)} /></label>
+                <button className="btn secondary small" style={{ marginBottom: 2 }} disabled={saving || capInput === null}
+                  onClick={() => {
+                    const n = Number((capInput ?? '').replace(/[,，]/g, ''))
+                    if (Number.isFinite(n) && n > 0) {
+                      void mutate('setSetting', { row: { key: 'principal_cap', value: String(n) } }).then(() => setCapInput(null))
+                    }
+                  }}>保存</button>
+              </div>
+              <p className="muted" style={{ fontSize: 11, margin: '4px 0 0' }}>
+                売却方向（マイナス）だけを判定するので、積立額の大小には影響されません。頻繁に売却する運用なら小さめに、しない運用なら大きめでOKです
               </p>
             </details>
           </div>

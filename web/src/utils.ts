@@ -125,16 +125,23 @@ export interface NonInvestBreakdown {
   dProfit: number
   dPrincipal: number // Δ投資元本 = Δ投資 − Δ評価損益（積立入金や売却の純額）
   dPension: number | null
-  delta: number // 非投資の資産増減 = Δ現金 + Δ投資元本（年金は値動き・拠出とも除外）
+  tradeExcluded: boolean // 売買発生とみなしΔ元本を delta から除外した月
+  delta: number // 非投資の資産増減 = Δ現金 + Δ投資元本（売買除外月は Δ現金のみ）
 }
+
+/** 売買判定しきい値の既定値: Δ投資元本がこれを超えてマイナス（売却方向）の月は売買発生とみなす */
+export const DEFAULT_PRINCIPAL_CAP = 200_000
 
 /**
  * 非投資の資産増減の内訳（月別）。
  * - 非投資増減 = Δ現金 + Δ投資元本（投資元本 = 投資評価額 − 評価損益）
  * - 年金は値動きが評価損益に含まれず、拠出も給与天引き（手取り外）のため計算から除外
+ * - Δ投資元本 < −principalCap（売却方向）の月は売買（や損益リセット・記録ずれ）とみなし、
+ *   Δ元本を除外して Δ現金のみで算出。プラス方向（積立・買付）は現金と相殺されるため
+ *   金額の大小に関わらず除外しない（除外すると積立が支出に化けるため）
  * - 当月末・前月末の両方に現金・投資の記録があり、両方の月に評価損益の記録がある月のみ算出
  */
-export function nonInvestBreakdownByMonth(assets: AssetRow[]): Map<string, NonInvestBreakdown> {
+export function nonInvestBreakdownByMonth(assets: AssetRow[], principalCap: number = DEFAULT_PRINCIPAL_CAP): Map<string, NonInvestBreakdown> {
   const snap = assetSnapshotByMonthEnd(assets)
   const out = new Map<string, NonInvestBreakdown>()
   for (const [m, cur] of snap) {
@@ -145,21 +152,23 @@ export function nonInvestBreakdownByMonth(assets: AssetRow[]): Map<string, NonIn
     const dInvest = cur.invest - prev.invest
     const dProfit = cur.profit - prev.profit
     const dPrincipal = dInvest - dProfit
+    const tradeExcluded = dPrincipal < -principalCap
     out.set(m, {
       dCash,
       dInvest,
       dProfit,
       dPrincipal,
       dPension: cur.pension !== null && prev.pension !== null ? cur.pension - prev.pension : null,
-      delta: dCash + dPrincipal,
+      tradeExcluded,
+      delta: tradeExcluded ? dCash : dCash + dPrincipal,
     })
   }
   return out
 }
 
 /** 非投資の資産増減(月) = Δ現金 + Δ投資元本（詳細は nonInvestBreakdownByMonth 参照） */
-export function nonInvestDeltaByMonth(assets: AssetRow[]): Map<string, number> {
-  return new Map([...nonInvestBreakdownByMonth(assets)].map(([m, b]) => [m, b.delta]))
+export function nonInvestDeltaByMonth(assets: AssetRow[], principalCap: number = DEFAULT_PRINCIPAL_CAP): Map<string, number> {
+  return new Map([...nonInvestBreakdownByMonth(assets, principalCap)].map(([m, b]) => [m, b.delta]))
 }
 
 /**

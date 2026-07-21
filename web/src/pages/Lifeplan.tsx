@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Chart, Line } from 'react-chartjs-2'
 import HelpTip from '../components/HelpTip'
 import {
+  annualLoanPayment,
   BASIC_PENSION_FULL,
   childAllowanceByIndex,
   childAnnualCost,
@@ -97,10 +98,14 @@ export default function Lifeplan() {
     return out
   }, [data, persons, cfg])
 
-  const latestAssets = useMemo(() => {
+  // 開始資産の内訳（投資分は運用利回りが効く / 現金・年金は効かない）
+  const latestSnapshot = useMemo(() => {
     const assets = sortedAssets(data?.assets ?? [])
-    return assets.length ? assetTotal(assets[assets.length - 1]) : null
+    if (!assets.length) return null
+    const a = assets[assets.length - 1]
+    return { total: assetTotal(a), invest: a.investment ?? 0, liquid: (a.cash ?? 0) + (a.pension ?? 0) }
   }, [data])
+  const latestAssets = latestSnapshot?.total ?? null
 
   const resolvedNet = useMemo(() => {
     const out: Record<string, number> = {}
@@ -120,10 +125,18 @@ export default function Lifeplan() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cfg, estimatedIncome])
 
-  const startAssets = cfg?.start_assets_override ?? latestAssets ?? 0
+  // 開始資産: 手動上書きがあれば最新スナップの投資割合で投資/現金に按分、無ければスナップそのまま
+  const { startInvest, startLiquid } = useMemo(() => {
+    const override = cfg?.start_assets_override ?? null
+    if (override !== null) {
+      const ratio = latestSnapshot && latestSnapshot.total > 0 ? latestSnapshot.invest / latestSnapshot.total : 0.7
+      return { startInvest: override * ratio, startLiquid: override * (1 - ratio) }
+    }
+    return { startInvest: latestSnapshot?.invest ?? 0, startLiquid: latestSnapshot?.liquid ?? 0 }
+  }, [cfg, latestSnapshot])
   const result = useMemo(
-    () => (cfg ? simulate(cfg, startAssets, thisYear, resolvedNet, resolvedPension) : null),
-    [cfg, startAssets, resolvedNet, resolvedPension],
+    () => (cfg ? simulate(cfg, startInvest, startLiquid, thisYear, resolvedNet, resolvedPension) : null),
+    [cfg, startInvest, startLiquid, resolvedNet, resolvedPension],
   )
 
   if (!cfg || !result) return <p className="muted center">読み込み中…</p>
@@ -153,7 +166,7 @@ export default function Lifeplan() {
         <h2>
           総資産の推移（{thisYear}〜{thisYear + 80}年）{head?.birth_year ? ' ※横軸カッコ内は' + head.name + 'の年齢' : ''}
           <HelpTip title="総資産の計算">
-            毎年: 資産 = 前年資産 × (1＋運用利回り) ＋ 収入（給与・年金・カスタム収入） − 支出（基本生活費＋子供費用＋カスタム支出。毎年インフレ率分増加）。<br />
+            毎年: 投資分 ×= (1＋運用利回り)、現金分 += 収入 − 支出。資産合計 = 投資分＋現金分。収入=給与・年金・カスタム収入・住宅ローン控除、支出=基本生活費＋子供費用＋カスタム支出＋住宅（毎年インフレ率分増加、住宅は実額）。<br />
             実質資産 = 名目資産 ÷ (1＋インフレ率)^経過年（今の価値に換算した「目減り後」の額）。<br />
             名目資産が減らない場合は運用益が収支の赤字を上回っています（運用利回り0で収支のみの推移を確認可）。
           </HelpTip>
@@ -223,7 +236,7 @@ export default function Lifeplan() {
           <DecimalField label="実質インフレ率（%/年）" value={cfg.inflation} onChange={(v) => upd({ inflation: v })}
             help={<HelpTip title="インフレ率">支出（基本生活費・子供費用・カスタム支出）が毎年この率で増えます。例: 2%なら10年後の生活費は約1.22倍。「実質資産」の換算（名目資産÷(1+率)^経過年）にも使われます。小数入力可（例: 1.5）。</HelpTip>} />
           <DecimalField label="運用利回り（%/年）" value={cfg.invest_return} onChange={(v) => upd({ invest_return: v })}
-            help={<HelpTip title="運用利回り">資産全体が毎年この率で複利成長する想定です（投資・預金をまとめた平均利回り）。0にすると収支の積み上げだけの推移が確認できます。</HelpTip>} />
+            help={<HelpTip title="運用利回り">投資分（開始時点の投資額）にのみ毎年この率で複利が効きます。現金・年金には効きません。毎年の収支の黒字は現金として積み上がります（追加投資は考慮しない簡易版）。0にすると収支の積み上げだけの推移になります。</HelpTip>} />
         </div>
         <div className="row2">
           <DecimalField label="昇給率（%/年）" value={cfg.raise_rate} onChange={(v) => upd({ raise_rate: v })}
@@ -393,9 +406,71 @@ export default function Lifeplan() {
             <button className="btn danger small" style={{ marginBottom: 2 }} onClick={() => upd({ custom_flows: cfg.custom_flows.filter((_, j) => j !== i) })}>✕</button>
           </div>
         ))}
-        <button className="btn secondary small" onClick={() => upd({ custom_flows: [...cfg.custom_flows, { label: '', start_year: thisYear, end_year: thisYear, annual: -1_000_000 }] })}>
-          ＋ 行を追加
-        </button>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <button className="btn secondary small" onClick={() => upd({ custom_flows: [...cfg.custom_flows, { label: '', start_year: thisYear, end_year: thisYear, annual: -1_000_000 }] })}>
+            ＋ 空の行
+          </button>
+          <button className="btn secondary small" onClick={() => upd({ custom_flows: [...cfg.custom_flows, { label: '親の介護', start_year: thisYear + 10, end_year: thisYear + 14, annual: -1_080_000 }] })}>
+            ＋ 親の介護
+          </button>
+          <button className="btn secondary small" onClick={() => upd({ custom_flows: [...cfg.custom_flows, { label: '車の買替', start_year: thisYear + 5, end_year: thisYear + 5, annual: -2_500_000 }] })}>
+            ＋ 車の買替
+          </button>
+          <HelpTip title="テンプレの目安">
+            親の介護: 月9万円（在宅〜施設の中間的な自己負担の目安）×5年。年数・金額は各行で調整してください。
+            公的介護保険で7〜9割は給付されるため、ここに入れるのは自己負担分です。医療費控除で一部戻る場合がありますが小さいため考慮していません。
+            {'\n'}車の買替: 1回250万円。買い替えのたびに行を追加してください。
+          </HelpTip>
+        </div>
+      </div>
+
+      <div className="card">
+        <h2>
+          マイホーム購入
+          <HelpTip title="マイホームの計算">
+            購入年に頭金＋諸費用（物件価格の約7%）を支出。返済期間中は元利均等の年間返済額を支出。
+            購入後は修繕・維持費（年額）を支出に加え、現在の家賃×12を支出から控除します（購入で家賃が消えるため）。
+            住宅ローン控除は年末残高×0.7%（年上限内・簡易）を控除年数だけ収入側に加算します。
+            金額は購入時点の実額として扱います（インフレは掛けません）。
+          </HelpTip>
+        </h2>
+        <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+          <input type="checkbox" style={{ width: 'auto', marginTop: 0 }} checked={cfg.home.enabled}
+            onChange={(e) => upd({ home: { ...cfg.home, enabled: e.target.checked } })} />
+          マイホーム購入をプランに反映する
+        </label>
+        {cfg.home.enabled && (
+          <>
+            <div className="row2">
+              <label className="field">購入年
+                <input type="text" inputMode="numeric" value={cfg.home.buy_year} onChange={(e) => upd({ home: { ...cfg.home, buy_year: Number(e.target.value) || thisYear } })} /></label>
+              <label className="field">物件価格
+                <input type="text" inputMode="numeric" value={cfg.home.price} onChange={(e) => upd({ home: { ...cfg.home, price: Number(e.target.value.replace(/[,，]/g, '')) || 0 } })} /></label>
+            </div>
+            <div className="row2">
+              <label className="field">頭金
+                <input type="text" inputMode="numeric" value={cfg.home.down_payment} onChange={(e) => upd({ home: { ...cfg.home, down_payment: Number(e.target.value.replace(/[,，]/g, '')) || 0 } })} /></label>
+              <label className="field">借入額（住宅ローン）
+                <input type="text" inputMode="numeric" value={cfg.home.loan_amount} onChange={(e) => upd({ home: { ...cfg.home, loan_amount: Number(e.target.value.replace(/[,，]/g, '')) || 0 } })} /></label>
+            </div>
+            <div className="row2">
+              <DecimalField label="金利（%/年・固定）" value={cfg.home.interest_rate} onChange={(v) => upd({ home: { ...cfg.home, interest_rate: v } })} />
+              <label className="field">返済年数
+                <input type="text" inputMode="numeric" value={cfg.home.loan_years} onChange={(e) => upd({ home: { ...cfg.home, loan_years: Number(e.target.value) || 0 } })} /></label>
+            </div>
+            <div className="row2">
+              <label className="field">現在の家賃（月額・購入後は控除）
+                <input type="text" inputMode="numeric" value={cfg.home.current_rent_monthly} onChange={(e) => upd({ home: { ...cfg.home, current_rent_monthly: Number(e.target.value.replace(/[,，]/g, '')) || 0 } })} /></label>
+              <label className="field">修繕・維持費（年額）
+                <input type="text" inputMode="numeric" value={cfg.home.renovation_annual} onChange={(e) => upd({ home: { ...cfg.home, renovation_annual: Number(e.target.value.replace(/[,，]/g, '')) || 0 } })} /></label>
+            </div>
+            <label className="field">住宅ローン控除の年数（0=なし）
+              <input type="text" inputMode="numeric" value={cfg.home.loan_deduction_years} onChange={(e) => upd({ home: { ...cfg.home, loan_deduction_years: Number(e.target.value) || 0 } })} /></label>
+            <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>
+              年間返済額の目安: {yen(annualLoanPayment(cfg.home.loan_amount, cfg.home.interest_rate, cfg.home.loan_years))}／年
+            </p>
+          </>
+        )}
       </div>
 
       <div className="card">

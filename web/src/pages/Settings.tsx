@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { fetchAll } from '../api'
 import { appBaseUrl, mfBookmarklet, rakutenBookmarklet, zaimBookmarklet } from '../bookmarklets'
+import PersonEditor from '../components/PersonEditor'
 import { useStore } from '../store'
 import type { AllData } from '../types'
 
@@ -48,6 +49,8 @@ export default function Settings() {
 
   return (
     <>
+      {config && <PersonEditor />}
+
       <div className="card">
         <h2>API接続設定</h2>
         <label className="field">GAS ウェブアプリURL

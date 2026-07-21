@@ -8,7 +8,7 @@ interface Props {
   persons: string[] // 管理者リスト（カード内で切替）
 }
 
-const EMPTY_MONTH = { gross: '', health: '', pension_ins: '', employment: '', income_tax: '', resident_tax: '' }
+const EMPTY_MONTH = { gross: '', health: '', pension_ins: '', employment: '', care_ins: '', income_tax: '', resident_tax: '' }
 type BonusRow = { month: string; months: string; amount: string }
 
 const num = (s: string) => (s.trim() === '' ? null : Number(s.replace(/[,，]/g, '')))
@@ -85,6 +85,7 @@ export default function SalaryCard({ persons }: Props) {
       health: hit?.health?.toString() ?? '',
       pension_ins: hit?.pension_ins?.toString() ?? '',
       employment: hit?.employment?.toString() ?? '',
+      care_ins: hit?.care_ins?.toString() ?? '',
       income_tax: hit?.income_tax?.toString() ?? '',
       resident_tax: hit?.resident_tax?.toString() ?? '',
     })
@@ -107,6 +108,7 @@ export default function SalaryCard({ persons }: Props) {
     health: num(form.health),
     pension_ins: num(form.pension_ins),
     employment: num(form.employment),
+    care_ins: num(form.care_ins),
     income_tax: num(form.income_tax),
     resident_tax: num(form.resident_tax),
   })
@@ -120,6 +122,7 @@ export default function SalaryCard({ persons }: Props) {
         health: num(form.health),
         pension_ins: num(form.pension_ins),
         employment: num(form.employment),
+        care_ins: num(form.care_ins),
         income_tax: num(form.income_tax),
         resident_tax: num(form.resident_tax),
       },
@@ -142,6 +145,7 @@ export default function SalaryCard({ persons }: Props) {
       health: num(form.health),
       pension_ins: num(form.pension_ins),
       employment: num(form.employment),
+      care_ins: num(form.care_ins),
       income_tax: num(form.income_tax),
       resident_tax: num(form.resident_tax),
     }
@@ -285,6 +289,11 @@ export default function SalaryCard({ persons }: Props) {
           <input type="text" inputMode="numeric" value={form.employment} onChange={(e) => setForm({ ...form, employment: e.target.value })} /></label>
       </div>
       <div className="row2">
+        <label className="field">介護保険（40歳〜）<CalcBadge kind="social" />
+          <input type="text" inputMode="numeric" placeholder="0" value={form.care_ins} onChange={(e) => setForm({ ...form, care_ins: e.target.value })} /></label>
+        <label className="field" />
+      </div>
+      <div className="row2">
         <label className="field">所得税<CalcBadge kind="none" />
           <input type="text" inputMode="numeric" value={form.income_tax} onChange={(e) => setForm({ ...form, income_tax: e.target.value })} /></label>
         <label className="field">住民税<CalcBadge kind="none" />
@@ -293,7 +302,7 @@ export default function SalaryCard({ persons }: Props) {
       <div className="kv">
         <span className="muted">
           控除合計（自動計算）
-          <HelpTip>控除合計 = 健康保険 + 厚生年金保険 + 雇用保険 + 所得税 + 住民税（自動計算のため保存はされません）。総支給 − 控除合計 = 手取りとして収支タブの収入にも使われます。</HelpTip>
+          <HelpTip>控除合計 = 健康保険 + 厚生年金保険 + 雇用保険 + 介護保険 + 所得税 + 住民税（自動計算のため保存はされません）。総支給 − 控除合計 = 手取りとして収支タブの収入にも使われます。</HelpTip>
         </span>
         <b>{formDeduction !== null ? yen(formDeduction) : '−'}</b>
       </div>

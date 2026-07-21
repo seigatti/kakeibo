@@ -31,9 +31,6 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
   })
   const [msg, setMsg] = useState('')
   const [limitOpen, setLimitOpen] = useState(false)
-  const [personEdit, setPersonEdit] = useState(false)
-  const [newPerson, setNewPerson] = useState('')
-  const [renames, setRenames] = useState<Record<string, string>>({})
   const appliedPrefill = useRef<string | null>(null)
   const itemFormRef = useRef<HTMLDivElement>(null)
 
@@ -52,62 +49,6 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
   const selectPerson = (p: FurusatoPerson) => {
     setPersonState(p)
     localStorage.setItem('kakeibo.furusatoPerson', p)
-  }
-
-  const personHasData = (p: string) =>
-    (data?.furusato_items ?? []).some((i) => i.person === p) ||
-    (data?.furusato_years ?? []).some((y) => y.person === p) ||
-    (data?.furusato_salaries ?? []).some((s) => s.person === p)
-
-  const savePersons = async (list: string[]) => {
-    await mutate('setSetting', { row: { key: 'furusato_persons', value: list.join(',') } })
-  }
-
-  const addPerson = async () => {
-    const name = newPerson.trim()
-    if (!name || persons.includes(name)) return
-    await savePersons([...persons, name])
-    setNewPerson('')
-    selectPerson(name)
-  }
-
-  const renamePerson = async (from: string) => {
-    const to = (renames[from] ?? '').trim()
-    if (!to || to === from || persons.includes(to)) return
-    await mutate('renameFurusatoPerson', { from, to }) // 既存データを一括引き継ぎ
-    await savePersons(persons.map((p) => (p === from ? to : p)))
-    // 世帯主が旧名なら控除プロフィールも追随
-    const raw = data?.settings.find((s) => s.key === 'furusato_profile')?.value
-    if (raw) {
-      const prof = parseProfile(raw)
-      if (prof.head_person === from) {
-        await mutate('setSetting', { row: { key: 'furusato_profile', value: JSON.stringify({ ...prof, head_person: to }) } })
-      }
-    }
-    // ライフプランの大人の名前も追随（手取り年収の紐づけが切れないように）
-    const lifeplanRaw = data?.settings.find((s) => s.key === 'lifeplan_config')?.value
-    if (lifeplanRaw) {
-      try {
-        const plan = JSON.parse(lifeplanRaw) as { adults?: Array<{ name: string }> }
-        if (plan.adults?.some((a) => a.name === from)) {
-          plan.adults = plan.adults.map((a) => (a.name === from ? { ...a, name: to } : a))
-          await mutate('setSetting', { row: { key: 'lifeplan_config', value: JSON.stringify(plan) } })
-        }
-      } catch {
-        /* 壊れたJSONは触らない */
-      }
-    }
-    setRenames({ ...renames, [from]: '' })
-    if (person === from) selectPerson(to)
-  }
-
-  const deletePerson = async (p: string) => {
-    if (personHasData(p)) {
-      window.alert(`「${p}」には寄付や給与のデータがあるため削除できません。先にデータを削除するか、名前の変更で対応してください。`)
-      return
-    }
-    if (!window.confirm(`管理者「${p}」を削除しますか？`)) return
-    await savePersons(persons.filter((x) => x !== p))
   }
 
   // 年・人の切替で上限フォームへ既存値を反映
@@ -291,34 +232,10 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
         {persons.map((p) => (
           <button key={p} className={person === p ? 'on' : ''} onClick={() => selectPerson(p)}>{p}</button>
         ))}
-        <button title="管理者を編集" style={{ flex: '0 0 40px' }} className={personEdit ? 'on' : ''} onClick={() => setPersonEdit(!personEdit)}>✎</button>
         <select style={{ flex: 1, marginTop: 0, width: 'auto' }} value={year} onChange={(e) => setYear(Number(e.target.value))}>
           {allYears.map((y) => <option key={y} value={y}>{y}年</option>)}
         </select>
       </div>
-
-      {personEdit && (
-        <div className="card">
-          <h2>管理者の編集</h2>
-          {persons.map((p) => (
-            <div key={p} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
-              <span style={{ flex: '0 0 60px' }}>{p}</span>
-              <input type="text" placeholder="新しい名前" style={{ marginTop: 0, flex: 1 }}
-                value={renames[p] ?? ''} onChange={(e) => setRenames({ ...renames, [p]: e.target.value })} />
-              <button className="btn small secondary" disabled={saving || !(renames[p] ?? '').trim()} onClick={() => void renamePerson(p)}>変更</button>
-              <button className="btn danger small" disabled={saving} onClick={() => void deletePerson(p)}>削除</button>
-            </div>
-          ))}
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <input type="text" placeholder="追加する名前" style={{ marginTop: 0, flex: 1 }}
-              value={newPerson} onChange={(e) => setNewPerson(e.target.value)} />
-            <button className="btn small" style={{ width: 'auto' }} disabled={saving || !newPerson.trim()} onClick={() => void addPerson()}>追加</button>
-          </div>
-          <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
-            名前を変更すると、その管理者の寄付・上限・給与データもすべて新しい名前に引き継がれます。
-          </p>
-        </div>
-      )}
 
       <div className="card">
         <h2>{year}年の上限額（{person}）</h2>

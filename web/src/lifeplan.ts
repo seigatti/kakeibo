@@ -41,9 +41,35 @@ export interface CustomFlow {
   annual: number // 年額（現在価格）。マイナス=支出、プラス=収入
 }
 
+export interface HomePlan {
+  enabled: boolean
+  buy_year: number
+  price: number // 物件価格
+  down_payment: number // 頭金
+  loan_amount: number // 借入額
+  interest_rate: number // %（住宅ローン金利・固定）
+  loan_years: number // 返済年数
+  current_rent_monthly: number // 現在の家賃（月額）。購入後は支出から控除
+  renovation_annual: number // 修繕・維持費（年額・購入後ずっと）
+  loan_deduction_years: number // 住宅ローン控除の年数（0=なし）
+}
+
+export const DEFAULT_HOME: HomePlan = {
+  enabled: false,
+  buy_year: new Date().getFullYear() + 3,
+  price: 40_000_000,
+  down_payment: 4_000_000,
+  loan_amount: 36_000_000,
+  interest_rate: 1.0,
+  loan_years: 35,
+  current_rent_monthly: 80_000,
+  renovation_annual: 200_000,
+  loan_deduction_years: 13,
+}
+
 export interface LifeplanConfig {
   inflation: number // %（実質インフレ率）
-  invest_return: number // %（運用利回り）
+  invest_return: number // %（運用利回り。投資分にのみ複利で適用）
   raise_rate: number // %（昇給率）
   pension_growth: number // %（年金の上昇率。0=受給額は現在の額のまま。物価連動にするならインフレ率と同値）
   living_cost: number // 基本生活費（年額・現在価格・子供費用を除く）
@@ -52,6 +78,7 @@ export interface LifeplanConfig {
   adults: LifeplanAdult[]
   children: LifeplanChild[]
   custom_flows: CustomFlow[]
+  home: HomePlan
 }
 
 export const DEFAULT_LIFEPLAN: LifeplanConfig = {
@@ -65,6 +92,7 @@ export const DEFAULT_LIFEPLAN: LifeplanConfig = {
   adults: [],
   children: [],
   custom_flows: [],
+  home: DEFAULT_HOME,
 }
 
 export function parseLifeplan(json: string | null | undefined): LifeplanConfig {
@@ -77,10 +105,32 @@ export function parseLifeplan(json: string | null | undefined): LifeplanConfig {
       adults: Array.isArray(v.adults) ? v.adults : [],
       children: Array.isArray(v.children) ? v.children : [],
       custom_flows: Array.isArray(v.custom_flows) ? v.custom_flows : [],
+      home: { ...DEFAULT_HOME, ...(v.home ?? {}) },
     }
   } catch {
     return DEFAULT_LIFEPLAN
   }
+}
+
+/** 住宅ローンの年間返済額（元利均等・固定金利）。rate=%/年、years=返済年数 */
+export function annualLoanPayment(principal: number, ratePct: number, years: number): number {
+  if (principal <= 0 || years <= 0) return 0
+  const r = ratePct / 100
+  if (r === 0) return principal / years
+  const monthly = principal * (r / 12) * Math.pow(1 + r / 12, years * 12) / (Math.pow(1 + r / 12, years * 12) - 1)
+  return monthly * 12
+}
+
+/** ローン残高（返済n年経過後・元利均等） */
+export function loanBalance(principal: number, ratePct: number, years: number, elapsed: number): number {
+  if (elapsed <= 0) return principal
+  if (elapsed >= years) return 0
+  const r = ratePct / 100 / 12
+  const n = years * 12
+  const m = elapsed * 12
+  if (r === 0) return principal * (1 - m / n)
+  const bal = principal * (Math.pow(1 + r, n) - Math.pow(1 + r, m)) / (Math.pow(1 + r, n) - 1)
+  return Math.max(0, bal)
 }
 
 /**
@@ -167,8 +217,10 @@ export interface LifeplanRow {
   living: number // 名目の基本生活費
   childCost: number // 名目の子供費用
   custom: number // 名目のカスタム収支（純額）
+  home: number // 名目の住宅関連の純収支（控除−頭金−返済−修繕+家賃控除）
   expense: number // 名目の年支出
-  assetsNominal: number
+  assetsInvest: number // 投資分（運用利回りが効く）
+  assetsNominal: number // 資産合計（投資分＋現金分）
   assetsReal: number
 }
 
@@ -183,13 +235,15 @@ export interface LifeplanResult {
  */
 export function simulate(
   cfg: LifeplanConfig,
-  startAssets: number,
+  startInvest: number,
+  startLiquid: number,
   startYear: number,
   resolvedNet: Record<string, number>,
   resolvedPension?: Record<string, number>,
 ): LifeplanResult {
   const rows: LifeplanRow[] = []
-  let assets = startAssets
+  let invest = startInvest // 運用利回りが効く投資分
+  let liquid = startLiquid // 現金・年金（利回りは効かず、収支の黒字が積み上がる）
   let depletionYear: number | null = null
 
   for (let i = 0; i <= 80; i++) {
@@ -226,13 +280,31 @@ export function simulate(
       }
     }
 
+    // マイホーム（現在価格。インフレは掛けない＝購入時点の実額として扱う）
+    let homeNet = 0 // プラス=収入方向（家賃控除・ローン控除）、マイナス=支出
+    const h = cfg.home
+    if (h?.enabled) {
+      if (year === h.buy_year) homeNet -= h.down_payment + h.price * 0.07 // 頭金＋諸費用（約7%）
+      const elapsed = year - h.buy_year
+      if (elapsed >= 0 && elapsed < h.loan_years) homeNet -= annualLoanPayment(h.loan_amount, h.interest_rate, h.loan_years)
+      if (elapsed >= 0) {
+        homeNet -= h.renovation_annual // 修繕・維持費
+        homeNet += h.current_rent_monthly * 12 // 購入で家賃が消える＝支出減
+      }
+      if (elapsed >= 0 && elapsed < h.loan_deduction_years) {
+        homeNet += Math.min(loanBalance(h.loan_amount, h.interest_rate, h.loan_years, elapsed) * 0.007, 300_000) // 住宅ローン控除（残高0.7%・上限内・簡易）
+      }
+    }
+
     const living = cfg.living_cost * infl
     const childNominal = childCost * infl
-    const expense = living + childNominal + customOut * infl
-    const income = salary + pension + customIn * infl
+    const expense = living + childNominal + customOut * infl - Math.min(homeNet, 0) // 住宅の支出分
+    const income = salary + pension + customIn * infl + Math.max(homeNet, 0) // 住宅の収入分（家賃控除・ローン控除）
 
-    // 年初資産に運用益、その年の収支を反映して年末資産へ
-    assets = assets * (1 + cfg.invest_return / 100) + income - expense
+    // 投資分は運用利回りで複利成長。年間収支の黒字/赤字は現金（liquid）で調整
+    invest *= 1 + cfg.invest_return / 100
+    liquid += income - expense
+    const assets = invest + liquid
     if (assets < 0 && depletionYear === null) depletionYear = year
 
     rows.push({
@@ -243,7 +315,9 @@ export function simulate(
       living: Math.round(living),
       childCost: Math.round(childNominal),
       custom: Math.round((customIn - customOut) * infl),
+      home: Math.round(homeNet),
       expense: Math.round(expense),
+      assetsInvest: Math.round(invest),
       assetsNominal: Math.round(assets),
       assetsReal: Math.round(assets / infl),
     })

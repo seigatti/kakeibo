@@ -508,7 +508,7 @@ export function estimateSalary(entries: FurusatoSalary[], bonusBase: number | nu
   const bonusTotal = monthlyBonus.reduce((s, b) => s + b.amount, 0)
   const annualIncome = monthlyGross.reduce((s, g) => s + g.gross, 0) + bonusTotal
 
-  const socialOf = (e: FurusatoSalary) => (e.health ?? 0) + (e.pension_ins ?? 0) + (e.employment ?? 0)
+  const socialOf = (e: FurusatoSalary) => (e.health ?? 0) + (e.pension_ins ?? 0) + (e.employment ?? 0) + (e.care_ins ?? 0)
   const withSocial = entries.filter((e) => socialOf(e) > 0)
   let annualSocial = 0
   if (withSocial.length > 0) {
@@ -530,7 +530,7 @@ export function estimateSalary(entries: FurusatoSalary[], bonusBase: number | nu
 
 /** 控除合計（=健保+厚年+雇用+所得税+住民税）。全項目未入力なら null */
 export function deductionTotal(e: Partial<FurusatoSalary>): number | null {
-  const vals = [e.health, e.pension_ins, e.employment, e.income_tax, e.resident_tax]
+  const vals = [e.health, e.pension_ins, e.employment, e.care_ins, e.income_tax, e.resident_tax]
   if (vals.every((v) => v === null || v === undefined)) return null
   return vals.reduce<number>((s, v) => s + (v ?? 0), 0)
 }

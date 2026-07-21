@@ -25,7 +25,12 @@ Chart.register(
   Filler,
 )
 
+import ChartDataLabels from 'chartjs-plugin-datalabels'
 import { isMasked } from './utils'
+
+// 値ラベル表示プラグイン。既定はOFFにして、使いたいチャートだけ options で有効化する
+Chart.register(ChartDataLabels)
+Chart.defaults.set('plugins.datalabels', { display: false })
 
 Chart.defaults.color = '#94a3b8'
 Chart.defaults.borderColor = 'rgba(148, 163, 184, 0.15)'

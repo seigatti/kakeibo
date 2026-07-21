@@ -1,4 +1,4 @@
-import type { AssetRow, BonusConfig, ExpenseRow, FixedCostRow, FurusatoProfile, FurusatoSalary, IncomeRow } from './types'
+import type { AllData, AssetRow, BonusConfig, ExpenseRow, FixedCostRow, FurusatoProfile, FurusatoSalary, IncomeRow } from './types'
 
 // ---- 金額マスク（他人に画面を見られても金額がわからないようにする全画面共通スイッチ） ----
 let masked = false
@@ -183,6 +183,66 @@ export function estimateOtherExpense(
 ): number | null {
   if (nonInvestDelta === undefined) return null
   return Math.max(0, Math.round(income - fixed - variable - nonInvestDelta))
+}
+
+export interface PeriodSummary {
+  months: string[] // 集計対象の月リスト
+  income: number // 収入合計（実効収入: 手入力優先・無ければ給与データの手取り）
+  fixed: number // 固定費（月割り）合計
+  variable: number // 変動費合計
+  other: number // その他支出（推計）合計 — 算出できた月のみ
+  otherMonths: number // その他支出を算出できた月数
+  expense: number // 支出合計 = fixed + variable + other
+  balance: number // 収支合計 = income − expense
+  assetDelta: number | null // 期間の資産増減（期間首尾の月末スナップショット差。取れない場合null）
+}
+
+/** 期間（from〜to、YYYY-MM両端含む）の収支を集計する */
+export function periodSummary(
+  data: Pick<AllData, 'income' | 'expenses' | 'fixed_costs' | 'assets'> & { furusato_salaries?: AllData['furusato_salaries'] },
+  from: string,
+  to: string,
+  principalCap: number = DEFAULT_PRINCIPAL_CAP,
+): PeriodSummary {
+  const months = from <= to ? monthRange(from, to) : []
+  const incMap = effectiveIncomeByMonth(data.income, data.furusato_salaries ?? [])
+  const expMap = expenseByMonth(data.expenses)
+  const breakdown = nonInvestBreakdownByMonth(data.assets, principalCap)
+
+  let income = 0
+  let fixed = 0
+  let variable = 0
+  let other = 0
+  let otherMonths = 0
+  for (const m of months) {
+    income += incMap.get(m) ?? 0
+    fixed += fixedMonthlyTotal(data.fixed_costs, m)
+    variable += expMap.get(m) ?? 0
+    const o = estimateOtherExpense(incMap.get(m) ?? 0, fixedMonthlyTotal(data.fixed_costs, m), expMap.get(m) ?? 0, breakdown.get(m)?.delta)
+    if (o !== null) {
+      other += o
+      otherMonths++
+    }
+  }
+  const expense = fixed + variable + other
+
+  // 期間の資産増減: from前月末 と to月末 の月末スナップショット差（無ければ期間内の最初/最後で近似）
+  const snap = assetSnapshotByMonthEnd(data.assets)
+  const startSnap = snap.get(addMonths(from, -1)) ?? (months.map((m) => snap.get(m)).find((s) => s) || null)
+  const endSnap = [...months].reverse().map((m) => snap.get(m)).find((s) => s) ?? null
+  const assetDelta = startSnap && endSnap && startSnap !== endSnap ? endSnap.total - startSnap.total : null
+
+  return {
+    months,
+    income: Math.round(income),
+    fixed: Math.round(fixed),
+    variable: Math.round(variable),
+    other: Math.round(other),
+    otherMonths,
+    expense: Math.round(expense),
+    balance: Math.round(income - expense),
+    assetDelta,
+  }
 }
 
 /** ふるさとの月次給与から月ごとの世帯手取り（総支給−控除合計。全員分合算） */

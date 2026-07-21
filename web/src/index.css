@@ -416,6 +416,16 @@ button {
   text-align: right;
 }
 
+.linklike {
+  background: none;
+  border: none;
+  color: var(--accent);
+  padding: 0;
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 /* 金額マスク中は数値入力欄の値も●で隠す（編集は可能。Chrome/Edge/Safari対応） */
 .masked input[inputmode='numeric'],
 .masked input[inputmode='decimal'] {

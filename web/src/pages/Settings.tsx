@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { fetchAll } from '../api'
 import { appBaseUrl, mfBookmarklet, rakutenBookmarklet, zaimBookmarklet } from '../bookmarklets'
+import ConstantsEditor from '../components/ConstantsEditor'
 import PersonEditor from '../components/PersonEditor'
 import { useStore } from '../store'
 import type { AllData } from '../types'
@@ -50,6 +51,7 @@ export default function Settings() {
   return (
     <>
       {config && <PersonEditor />}
+      {config && <ConstantsEditor />}
 
       <div className="card">
         <h2>API接続設定</h2>

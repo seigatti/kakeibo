@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Chart, Line } from 'react-chartjs-2'
 import HelpTip from '../components/HelpTip'
+import { getConst } from '../constants'
 import {
   annualLoanPayment,
   BASIC_PENSION_FULL,
@@ -115,7 +116,7 @@ export default function Lifeplan() {
 
   // 年金の想定: 額面は給与データ由来、無ければ手入力手取り÷0.78で概算
   const pensionEstOf = (a: LifeplanAdult) => {
-    const gross = estimatedIncome[a.name]?.gross ?? (a.net_income ? Math.round(a.net_income / 0.78) : null)
+    const gross = estimatedIncome[a.name]?.gross ?? (a.net_income ? Math.round(a.net_income / getConst('net_to_gross')) : null)
     return estimatePension(gross, a.retire_age)
   }
   const resolvedPension = useMemo(() => {

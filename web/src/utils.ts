@@ -1,3 +1,4 @@
+import { getConst } from './constants'
 import type { AllData, AssetRow, BonusConfig, ExpenseRow, FixedCostRow, FurusatoProfile, FurusatoSalary, IncomeRow } from './types'
 
 // ---- 金額マスク（他人に画面を見られても金額がわからないようにする全画面共通スイッチ） ----
@@ -325,23 +326,25 @@ export function incomeTaxOf(taxable: number): { tax: number; rate: number } {
 
 /** 生命保険料控除（新制度・一般生命保険のみの簡易計算）: 所得税側(it)/住民税側(rt) */
 export function lifeInsuranceDeduction(paid: number): { it: number; rt: number } {
-  const it = paid <= 20_000 ? paid : paid <= 40_000 ? paid / 2 + 10_000 : paid <= 80_000 ? paid / 4 + 20_000 : 40_000
-  const rt = paid <= 12_000 ? paid : paid <= 32_000 ? paid / 2 + 6_000 : paid <= 56_000 ? paid / 4 + 14_000 : 28_000
+  const capIt = getConst('life_ins_cap_it')
+  const capRt = getConst('life_ins_cap_rt')
+  const it = paid <= 20_000 ? paid : paid <= 40_000 ? paid / 2 + 10_000 : paid <= 80_000 ? paid / 4 + 20_000 : capIt
+  const rt = paid <= 12_000 ? paid : paid <= 32_000 ? paid / 2 + 6_000 : paid <= 56_000 ? paid / 4 + 14_000 : capRt
   return { it, rt }
 }
 
-/** 地震保険料控除: 所得税側 min(支払, 5万) / 住民税側 min(支払/2, 2.5万) */
+/** 地震保険料控除: 所得税側 min(支払, 上限) / 住民税側 min(支払/2, 上限) */
 export function quakeInsuranceDeduction(paid: number): { it: number; rt: number } {
-  return { it: Math.min(paid, 50_000), rt: Math.min(paid / 2, 25_000) }
+  return { it: Math.min(paid, getConst('quake_ins_cap_it')), rt: Math.min(paid / 2, getConst('quake_ins_cap_rt')) }
 }
 
 /** 扶養控除（対象年12/31時点の年齢で判定） */
 export function dependentDeduction(age: number): { it: number; rt: number; label: string } {
   if (age < 16) return { it: 0, rt: 0, label: '対象外(16歳未満)' }
-  if (age <= 18) return { it: 380_000, rt: 330_000, label: '一般' }
-  if (age <= 22) return { it: 630_000, rt: 450_000, label: '特定' }
-  if (age < 70) return { it: 380_000, rt: 330_000, label: '一般' }
-  return { it: 480_000, rt: 380_000, label: '老人' }
+  if (age <= 18) return { it: getConst('dep_general_it'), rt: getConst('dep_general_rt'), label: '一般' }
+  if (age <= 22) return { it: getConst('dep_specific_it'), rt: getConst('dep_specific_rt'), label: '特定' }
+  if (age < 70) return { it: getConst('dep_general_it'), rt: getConst('dep_general_rt'), label: '一般' }
+  return { it: getConst('dep_elderly_it'), rt: getConst('dep_elderly_rt'), label: '老人' }
 }
 
 export interface FurusatoLimitInputs {
@@ -392,26 +395,26 @@ export function furusatoLimitDetailed(inp: FurusatoLimitInputs): { limit: number
   const quake = inp.quakePaid ? quakeInsuranceDeduction(inp.quakePaid) : { it: 0, rt: 0 }
   const medical =
     inp.medicalDeductionOverride ??
-    (inp.medicalPaid ? Math.max(0, inp.medicalPaid - Math.min(100_000, shotoku * 0.05)) : 0)
-  const spouse = inp.spouse ? { it: 380_000, rt: 330_000 } : { it: 0, rt: 0 }
+    (inp.medicalPaid ? Math.max(0, inp.medicalPaid - Math.min(getConst('medical_floor'), shotoku * 0.05)) : 0)
+  const spouse = inp.spouse ? { it: getConst('spouse_it'), rt: getConst('spouse_rt') } : { it: 0, rt: 0 }
   const dependents = (inp.dependentAges ?? []).map((age) => ({ age, ...dependentDeduction(age) }))
   const depIT = dependents.reduce((s, d) => s + d.it, 0)
   const depRT = dependents.reduce((s, d) => s + d.rt, 0)
 
   const basicIT = basicDeductionIT(shotoku, year)
   const taxableIT = Math.max(0, shotoku - social - life.it - quake.it - medical - spouse.it - depIT - basicIT)
-  const taxableRT = Math.max(0, shotoku - social - life.rt - quake.rt - medical - spouse.rt - depRT - 430_000) // 住民税の基礎控除は43万のまま
+  const taxableRT = Math.max(0, shotoku - social - life.rt - quake.rt - medical - spouse.rt - depRT - getConst('resident_basic_deduction'))
 
   const { tax: incomeTax, rate } = incomeTaxOf(taxableIT)
-  const residentTax = taxableRT * 0.1
+  const residentTax = taxableRT * (getConst('resident_tax_rate') / 100)
 
-  // 住宅ローン控除: 所得税から引き切れない分が住民税から控除（上限 課税所得×7% / 136,500円）→ 所得割が減り上限も下がる
+  // 住宅ローン控除: 所得税から引き切れない分が住民税から控除（上限 課税所得×7% / 住民税上限）→ 所得割が減り上限も下がる
   const loanResident = inp.loanAnnualDeduction
-    ? Math.min(Math.max(0, inp.loanAnnualDeduction - incomeTax), Math.min(taxableIT * 0.07, 136_500))
+    ? Math.min(Math.max(0, inp.loanAnnualDeduction - incomeTax), Math.min(taxableIT * 0.07, getConst('loan_resident_cap')))
     : 0
   const residentTaxAfterLoan = Math.max(0, residentTax - loanResident)
 
-  const limit = Math.floor(((residentTaxAfterLoan * 0.2) / (0.9 - rate * 1.021) + 2000) / 1000) * 1000
+  const limit = Math.floor(((residentTaxAfterLoan * 0.2) / (0.9 - rate * 1.021) + getConst('furusato_self_pay')) / 1000) * 1000
   return {
     limit,
     breakdown: {

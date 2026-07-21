@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useStore } from './store'
 import MemoWindow from './MemoWindow'
+import { setConstantOverrides } from './constants'
 import { setMasked } from './utils'
 import Dashboard from './pages/Dashboard'
 import Assets from './pages/Assets'
@@ -48,6 +49,8 @@ export default function App() {
 
   // 子コンポーネントの描画前にモジュールフラグへ反映（yen/yenShort/amt がマスクされる）
   setMasked(masked)
+  // 計算の基準値オーバーライドを反映（データ読込後、計算する各ページの描画前）
+  setConstantOverrides(data?.settings.find((s) => s.key === 'constants_override')?.value)
 
   useEffect(() => {
     const onHash = () => setRoute(parseHash())

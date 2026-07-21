@@ -5,6 +5,7 @@
  * - 実質資産 = 名目資産 ÷ (1+インフレ)^経過年（今の価値に換算）
  * - 年金は物価連動と仮定してインフレで増額、給与は昇給率で増額
  */
+import { getConst } from './constants.ts'
 import type { BonusConfig, FurusatoSalary } from './types.ts'
 import { deductionTotal, estimateSalary, type SalaryEstimate } from './utils.ts'
 
@@ -140,15 +141,16 @@ export function loanBalance(principal: number, ratePct: number, years: number, e
  */
 export function childAnnualCost(age: number, c: LifeplanChild): number {
   if (age < 0) return 0
-  if (age <= 2) return 600_000 + (c.nursery ? 500_000 : 0) // 乳児期＋保育料（3歳〜は無償化前提）
-  if (age <= 5) return 700_000
-  if (age <= 11) return c.elementary === '私立' ? 2_200_000 : 900_000
-  if (age <= 14) return c.junior === '私立' ? 2_050_000 : 1_150_000
-  if (age <= 17) return c.high === '私立' ? 1_250_000 : 1_100_000 // 授業料無償化反映後
+  if (age <= 2) return getConst('child_infant') + (c.nursery ? getConst('child_nursery') : 0)
+  if (age <= 5) return getConst('child_preschool')
+  if (age <= 11) return c.elementary === '私立' ? getConst('child_elem_private') : getConst('child_elem_public')
+  if (age <= 14) return c.junior === '私立' ? getConst('child_junior_private') : getConst('child_junior_public')
+  if (age <= 17) return c.high === '私立' ? getConst('child_high_private') : getConst('child_high_public')
   if (c.path === '高卒') return 0
   const lastAge = c.path === '大学院' ? 23 : 21
   if (age <= lastAge) {
-    return (c.college === '私立' ? 1_600_000 : 1_100_000) + (c.living === '一人暮らし' ? 1_200_000 : 400_000)
+    return (c.college === '私立' ? getConst('child_univ_private') : getConst('child_univ_public')) +
+      (c.living === '一人暮らし' ? getConst('child_live_alone') : getConst('child_live_home'))
   }
   return 0
 }
@@ -167,7 +169,7 @@ export function childAllowanceByIndex(children: LifeplanChild[], year: number): 
   const out = children.map(() => 0)
   ranked.forEach((x, rank) => {
     if (x.age > 18) return // カウントには入るが支給は18歳年度末まで
-    out[x.idx] = rank >= 2 ? 360_000 : x.age <= 2 ? 180_000 : 120_000
+    out[x.idx] = rank >= 2 ? getConst('allowance_third') : x.age <= 2 ? getConst('allowance_0_2') : getConst('allowance_3_18')
   })
   return out
 }
@@ -192,18 +194,18 @@ export function estimateNetIncome(entries: FurusatoSalary[], bonusBase: number |
   return estimateIncome(entries, bonusBase, bonusConfig)?.net ?? null
 }
 
-/** 老齢基礎年金の満額（2026年度=令和8年度: 847,300円/年） */
-export const BASIC_PENSION_FULL = 847_300
+/** 老齢基礎年金の満額（基準値。設定で変更可） */
+export const BASIC_PENSION_FULL = getConst('pension_full')
 
 /**
  * 年金の年額を想定（簡易式）:
- * 老齢基礎年金 847,300円(2026年度満額) × min(加入年数,40)/40 + 老齢厚生年金 ≒ 平均年収(額面) × 0.5481% × 加入年数
- * 加入年数 = min(退職年齢, 65) − 22
+ * 老齢基礎年金 満額 × min(加入年数,40)/40 + 老齢厚生年金 ≒ 平均年収(額面) × 係数% × 加入年数
+ * 加入年数 = min(退職年齢, 加入上限年齢) − 加入開始年齢
  */
 export function estimatePension(grossAnnual: number | null, retireAge: number): number {
-  const years = Math.max(0, Math.min(retireAge, 65) - 22)
-  const basic = BASIC_PENSION_FULL * (Math.min(years, 40) / 40)
-  const kosei = (grossAnnual ?? 0) * 0.005481 * years
+  const years = Math.max(0, Math.min(retireAge, getConst('pension_join_end_age')) - getConst('pension_join_start_age'))
+  const basic = getConst('pension_full') * (Math.min(years, 40) / 40)
+  const kosei = (grossAnnual ?? 0) * (getConst('pension_kosei_rate') / 100) * years
   return Math.round(basic + kosei)
 }
 
@@ -284,7 +286,7 @@ export function simulate(
     let homeNet = 0 // プラス=収入方向（家賃控除・ローン控除）、マイナス=支出
     const h = cfg.home
     if (h?.enabled) {
-      if (year === h.buy_year) homeNet -= h.down_payment + h.price * 0.07 // 頭金＋諸費用（約7%）
+      if (year === h.buy_year) homeNet -= h.down_payment + h.price * (getConst('home_fee_rate') / 100) // 頭金＋諸費用
       const elapsed = year - h.buy_year
       if (elapsed >= 0 && elapsed < h.loan_years) homeNet -= annualLoanPayment(h.loan_amount, h.interest_rate, h.loan_years)
       if (elapsed >= 0) {
@@ -292,7 +294,7 @@ export function simulate(
         homeNet += h.current_rent_monthly * 12 // 購入で家賃が消える＝支出減
       }
       if (elapsed >= 0 && elapsed < h.loan_deduction_years) {
-        homeNet += Math.min(loanBalance(h.loan_amount, h.interest_rate, h.loan_years, elapsed) * 0.007, 300_000) // 住宅ローン控除（残高0.7%・上限内・簡易）
+        homeNet += Math.min(loanBalance(h.loan_amount, h.interest_rate, h.loan_years, elapsed) * (getConst('home_loan_deduction_rate') / 100), getConst('home_loan_deduction_cap')) // 住宅ローン控除（残高×率・上限内・簡易）
       }
     }
 

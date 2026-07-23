@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Line } from 'react-chartjs-2'
 import { useStore } from '../store'
 import { assetTotal, sortedAssets, today, yen, yenShort } from '../utils'
+import LiabilityCard from './LiabilityCard'
 
 type Range = '1y' | '3y' | 'all'
 
@@ -169,6 +170,8 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
           </div>
         </div>
       )}
+
+      <LiabilityCard />
 
       {assets.length > 0 && (
         <div className="card">

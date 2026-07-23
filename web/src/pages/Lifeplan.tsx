@@ -17,7 +17,7 @@ import {
 } from '../lifeplan'
 import { useStore } from '../store'
 import { DEFAULT_PERSONS } from '../types'
-import { amt, assetTotal, parseBonusConfig, sortedAssets, yen, yenShort } from '../utils'
+import { amt, assetTotal, estimateLivingCost, parseBonusConfig, sortedAssets, yen, yenShort } from '../utils'
 
 const thisYear = new Date().getFullYear()
 
@@ -62,6 +62,8 @@ export default function Lifeplan() {
   const { data, mutate, saving } = useStore()
   const [cfg, setCfg] = useState<LifeplanConfig | null>(null)
   const [msg, setMsg] = useState('')
+  const [scenarioName, setScenarioName] = useState('')
+  const [compareName, setCompareName] = useState('')
 
   const persons = useMemo(() => {
     const raw = data?.settings.find((s) => s.key === 'furusato_persons')?.value
@@ -135,10 +137,41 @@ export default function Lifeplan() {
     }
     return { startInvest: latestSnapshot?.invest ?? 0, startLiquid: latestSnapshot?.liquid ?? 0 }
   }, [cfg, latestSnapshot])
+  // 基本生活費の自動推定（未入力時に採用）。実支出には現在の子供費用が含まれるので差し引く
+  const livingEstimate = useMemo(() => {
+    if (!data) return null
+    const allowances = childAllowanceByIndex(cfg?.children ?? [], thisYear)
+    const childNow = (cfg?.children ?? []).reduce(
+      (s, c, i) => s + childAnnualCost(thisYear - c.birth_year, c) * (cfg?.child_multiplier ?? 1) - allowances[i],
+      0,
+    )
+    return estimateLivingCost(data, childNow)
+  }, [data, cfg])
+  const resolvedLiving = cfg?.living_cost ?? livingEstimate?.annual ?? 0
+
   const result = useMemo(
-    () => (cfg ? simulate(cfg, startInvest, startLiquid, thisYear, resolvedNet, resolvedPension) : null),
-    [cfg, startInvest, startLiquid, resolvedNet, resolvedPension],
+    () => (cfg ? simulate(cfg, startInvest, startLiquid, thisYear, resolvedNet, resolvedPension, resolvedLiving) : null),
+    [cfg, startInvest, startLiquid, resolvedNet, resolvedPension, resolvedLiving],
   )
+
+  // 保存済みシナリオ（settings の lifeplan_scenarios にJSON保存）
+  const scenarios = useMemo(() => {
+    const raw = data?.settings.find((s) => s.key === 'lifeplan_scenarios')?.value
+    try {
+      const v = raw ? (JSON.parse(raw) as Array<{ name: string; config: LifeplanConfig }>) : []
+      return Array.isArray(v) ? v : []
+    } catch {
+      return []
+    }
+  }, [data])
+
+  // 比較対象のシミュレーション（同じ開始資産・収入前提で設定差だけを比較）
+  const compareResult = useMemo(() => {
+    const sc = scenarios.find((s) => s.name === compareName)
+    if (!sc) return null
+    const c = parseLifeplan(JSON.stringify(sc.config))
+    return simulate(c, startInvest, startLiquid, thisYear, resolvedNet, resolvedPension, c.living_cost ?? resolvedLiving)
+  }, [scenarios, compareName, startInvest, startLiquid, resolvedNet, resolvedPension, resolvedLiving])
 
   if (!cfg || !result) return <p className="muted center">読み込み中…</p>
 
@@ -161,8 +194,94 @@ export default function Lifeplan() {
   })
   const tickOpts = { maxTicksLimit: 9, maxRotation: 0 as const }
 
+  const saveScenario = async () => {
+    const name = scenarioName.trim()
+    if (!name || !cfg) return
+    const next = [...scenarios.filter((s) => s.name !== name), { name, config: cfg }]
+    await mutate('setSetting', { row: { key: 'lifeplan_scenarios', value: JSON.stringify(next) } })
+    setScenarioName('')
+    setMsg(`シナリオ「${name}」を保存しました ✓`)
+  }
+
+  const loadScenario = (name: string) => {
+    const sc = scenarios.find((s) => s.name === name)
+    if (!sc) return
+    if (!window.confirm(`現在の設定をシナリオ「${name}」の内容で置き換えます。よろしいですか？（保存前の変更は失われます）`)) return
+    setCfg(parseLifeplan(JSON.stringify(sc.config)))
+    setMsg(`シナリオ「${name}」を読み込みました（「設定を保存」で確定）`)
+  }
+
+  const deleteScenario = async (name: string) => {
+    if (!window.confirm(`シナリオ「${name}」を削除しますか？`)) return
+    await mutate('setSetting', { row: { key: 'lifeplan_scenarios', value: JSON.stringify(scenarios.filter((s) => s.name !== name)) } })
+    if (compareName === name) setCompareName('')
+  }
+
+  const last = result.rows[result.rows.length - 1]
+  const compareLast = compareResult?.rows[compareResult.rows.length - 1]
+
   return (
     <>
+      <div className="card">
+        <h2>
+          シナリオ比較
+          <HelpTip title="シナリオ比較">
+            現在の設定に名前を付けて保存し、別の設定と比較できます（例:「私立コース」「マイホーム購入」）。
+            比較を選ぶとグラフに黄色の破線でもう1本が重なり、80年後の資産と枯渇年を並べて確認できます。
+            比較は同じ開始資産・収入前提で行うので、<b>設定の違いだけ</b>が結果の差になります。
+          </HelpTip>
+        </h2>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'end', marginBottom: 8 }}>
+          <label className="field" style={{ marginBottom: 0, flex: 1 }}>現在の設定をシナリオとして保存
+            <input type="text" placeholder="例: 私立コース" value={scenarioName} onChange={(e) => setScenarioName(e.target.value)} /></label>
+          <button className="btn small" style={{ width: 'auto', marginBottom: 2 }} disabled={saving || !scenarioName.trim()} onClick={() => void saveScenario()}>保存</button>
+        </div>
+        {scenarios.length > 0 ? (
+          <>
+            <label className="field">比較するシナリオ
+              <select value={compareName} onChange={(e) => setCompareName(e.target.value)}>
+                <option value="">（比較しない）</option>
+                {scenarios.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}
+              </select></label>
+            <ul className="list">
+              {scenarios.map((s) => (
+                <li key={s.name}>
+                  <span style={{ flex: 1, fontSize: 13 }}>{s.name}</span>
+                  <button className="btn small secondary" onClick={() => loadScenario(s.name)}>読込</button>
+                  <button className="btn danger small" onClick={() => void deleteScenario(s.name)}>削除</button>
+                </li>
+              ))}
+            </ul>
+            {compareResult && compareLast && (
+              <div style={{ marginTop: 8 }}>
+                <div className="kv">
+                  <span className="muted">80年後の資産（現在の設定）</span><span>{yen(last.assetsNominal)}</span>
+                </div>
+                <div className="kv">
+                  <span className="muted">80年後の資産（{compareName}）</span><span style={{ color: '#fbbf24' }}>{yen(compareLast.assetsNominal)}</span>
+                </div>
+                <div className="kv" style={{ borderTop: '1px solid var(--border)', paddingTop: 6 }}>
+                  <span>差（比較 − 現在）</span>
+                  <b className={compareLast.assetsNominal - last.assetsNominal >= 0 ? 'pos' : 'neg'}>
+                    {compareLast.assetsNominal - last.assetsNominal >= 0 ? '+' : ''}{yen(compareLast.assetsNominal - last.assetsNominal)}
+                  </b>
+                </div>
+                <div className="kv">
+                  <span className="muted">資産が尽きる年</span>
+                  <span>
+                    現在: {result.depletionYear ?? 'なし'} / {compareName}: {compareResult.depletionYear ?? 'なし'}
+                  </span>
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
+            まだシナリオがありません。設定を変えて名前を付けて保存すると、あとから比較できます。
+          </p>
+        )}
+      </div>
+
       <div className="card">
         <h2>
           総資産の推移（{thisYear}〜{thisYear + 80}年）{head?.birth_year ? ' ※横軸カッコ内は' + head.name + 'の年齢' : ''}
@@ -178,7 +297,9 @@ export default function Lifeplan() {
               labels,
               datasets: [
                 { label: '名目資産', data: result.rows.map((r) => r.assetsNominal), borderColor: '#38bdf8', tension: 0.2, pointRadius: 0 },
-                { label: '実質資産（今の価値）', data: result.rows.map((r) => r.assetsReal), borderColor: '#c084fc', borderDash: [6, 4], tension: 0.2, pointRadius: 0 },
+                ...(compareResult
+                  ? [{ label: `比較: ${compareName}`, data: compareResult.rows.map((r) => r.assetsNominal), borderColor: '#fbbf24', borderDash: [8, 4], tension: 0.2, pointRadius: 0 }]
+                  : [{ label: '実質資産（今の価値）', data: result.rows.map((r) => r.assetsReal), borderColor: '#c084fc', borderDash: [6, 4], tension: 0.2, pointRadius: 0 }]),
               ],
             }}
             options={{
@@ -246,9 +367,16 @@ export default function Lifeplan() {
             help={<HelpTip title="年金の上昇率">0 = 受給額が現在の額のまま増えない保守的な想定。年金は物価に完全には連動しない（マクロ経済スライド）ため控えめな値を推奨。物価連動を想定するならインフレ率と同じ値を入力。</HelpTip>} />
         </div>
         <div className="row2">
-          <label className="field">基本生活費（年額・子供費用除く）
-            <HelpTip title="基本生活費">家賃・食費・光熱費など世帯の年間支出（子供にかかる分は除く。子供費用は下の子供設定から自動計算）。現在価格で入力し、毎年インフレ率分増えていきます。</HelpTip>
-            <input type="text" inputMode="numeric" value={cfg.living_cost} onChange={(e) => upd({ living_cost: Number(e.target.value.replace(/[,，]/g, '')) || 0 })} /></label>
+          <label className="field">基本生活費（空欄=実績から自動）
+            <HelpTip title="基本生活費">
+              家賃・食費・光熱費など世帯の年間支出（子供にかかる分は除く。子供費用は下の子供設定から自動計算）。現在価格で入力し、毎年インフレ率分増えていきます。
+              {'\n\n'}空欄にすると<b>過去12ヶ月の実支出から自動推定</b>します:
+              {'\n'}(固定費＋変動費＋その他支出) の月平均 × 12 − 現在の子供費用（年額）
+              {'\n'}※子供費用を差し引くのは、プラン側で子供費用を別途加算するため二重計上を防ぐためです。実支出の記録が少ない月があると精度が下がります。
+            </HelpTip>
+            <input type="text" inputMode="numeric"
+              placeholder={livingEstimate ? `想定: ${amt(livingEstimate.annual)}（実績より）` : '実績データ不足'}
+              value={cfg.living_cost ?? ''} onChange={(e) => upd({ living_cost: numOrNull(e.target.value) })} /></label>
           <DecimalField label="子供費用の倍率（標準=1.0）" value={cfg.child_multiplier} onChange={(v) => upd({ child_multiplier: v })}
             help={<HelpTip title="子供費用の倍率">内蔵の標準費用（子供カードの？参照）に掛ける係数。ご家庭の実感に合わせて 0.8〜1.2 程度で調整してください（児童手当は倍率をかけずにそのまま差し引きます）。</HelpTip>} />
         </div>

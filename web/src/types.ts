@@ -108,6 +108,22 @@ export interface MemoRow {
   updated_at: string | null
 }
 
+export type LiabilityKind = 'ローン' | 'その他'
+
+export interface LiabilityRow {
+  id: string
+  name: string
+  kind: LiabilityKind
+  principal: number | null // 当初借入額（ローン）
+  start_month: string | null // 返済開始月 YYYY-MM（ローン）
+  rate: number | null // 金利 %（ローン）
+  years: number | null // 返済年数（ローン）
+  balance_manual: number | null // 現在残高の実測（あれば現在時点はこれを優先。「その他」は必須）
+  memo: string | null
+}
+
+export const LIABILITY_KINDS: LiabilityKind[] = ['ローン', 'その他']
+
 export interface AllData {
   assets: AssetRow[]
   expenses: ExpenseRow[]
@@ -119,6 +135,7 @@ export interface AllData {
   furusato_years?: FurusatoYear[]
   furusato_salaries?: FurusatoSalary[]
   memos?: MemoRow[]
+  liabilities?: LiabilityRow[]
   settings: SettingRow[]
 }
 

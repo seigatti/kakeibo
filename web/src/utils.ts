@@ -1,5 +1,28 @@
-import { getConst } from './constants'
-import type { AllData, AssetRow, BonusConfig, ExpenseRow, FixedCostRow, FurusatoProfile, FurusatoSalary, IncomeRow } from './types'
+import { getConst } from './constants.ts'
+import type { AllData, AssetRow, BonusConfig, ExpenseRow, FixedCostRow, FurusatoProfile, FurusatoSalary, IncomeRow, LiabilityRow } from './types.ts'
+
+// ---- ローン計算（住宅ローン・負債で共用。lifeplan.ts からも再エクスポート） ----
+
+/** 住宅ローンの年間返済額（元利均等・固定金利）。rate=%/年、years=返済年数 */
+export function annualLoanPayment(principal: number, ratePct: number, years: number): number {
+  if (principal <= 0 || years <= 0) return 0
+  const r = ratePct / 100
+  if (r === 0) return principal / years
+  const monthly = (principal * (r / 12) * Math.pow(1 + r / 12, years * 12)) / (Math.pow(1 + r / 12, years * 12) - 1)
+  return monthly * 12
+}
+
+/** ローン残高（返済n年経過後・元利均等） */
+export function loanBalance(principal: number, ratePct: number, years: number, elapsed: number): number {
+  if (elapsed <= 0) return principal
+  if (elapsed >= years) return 0
+  const r = ratePct / 100 / 12
+  const n = years * 12
+  const m = elapsed * 12
+  if (r === 0) return principal * (1 - m / n)
+  const bal = (principal * (Math.pow(1 + r, n) - Math.pow(1 + r, m))) / (Math.pow(1 + r, n) - 1)
+  return Math.max(0, bal)
+}
 
 // ---- 金額マスク（他人に画面を見られても金額がわからないようにする全画面共通スイッチ） ----
 let masked = false
@@ -67,6 +90,67 @@ export function incomeByMonth(income: IncomeRow[]): Map<string, number> {
   const map = new Map<string, number>()
   for (const i of income) map.set(i.month, (i.salary ?? 0) + (i.other ?? 0))
   return map
+}
+
+// ---- 負債・純資産（バランスシート） ----
+
+/** 月差（YYYY-MM同士）。b が a より後なら正 */
+function monthDiff(from: string, to: string): number {
+  const [fy, fm] = from.split('-').map(Number)
+  const [ty, tm] = to.split('-').map(Number)
+  return (ty - fy) * 12 + (tm - fm)
+}
+
+/**
+ * 指定月末時点の負債残高。
+ * - ローン: 元利均等の返済スケジュールから算出（開始前は当初借入額、完済後は0）
+ * - その他: balance_manual をそのまま（期間の概念なし）
+ * - balance_manual があるローンは「現在月」の残高をその実測値に合わせ、他の月はスケジュール残高に同じ差分を按分せず、
+ *   現在以降のみ実測を起点に再計算（過去はスケジュールのまま）
+ */
+export function liabilityBalanceAt(l: LiabilityRow, month: string, currentMonth: string = thisMonth()): number {
+  if (l.kind === 'その他') return Math.max(0, l.balance_manual ?? 0)
+  const principal = l.principal ?? 0
+  const years = l.years ?? 0
+  const rate = l.rate ?? 0
+  if (principal <= 0 || years <= 0 || !l.start_month) return Math.max(0, l.balance_manual ?? 0)
+  const elapsedMonths = monthDiff(l.start_month, month)
+  if (elapsedMonths <= 0) return principal
+  if (elapsedMonths >= years * 12) return 0
+  const scheduled = loanBalance(principal, rate, years, elapsedMonths / 12)
+  // 実測がある場合は、現在月のスケジュール値との差を将来にも引き継ぐ（繰上返済などのズレを反映）
+  if (l.balance_manual !== null && l.balance_manual !== undefined) {
+    const curElapsed = monthDiff(l.start_month, currentMonth)
+    if (curElapsed > 0 && curElapsed < years * 12 && month >= currentMonth) {
+      const curScheduled = loanBalance(principal, rate, years, curElapsed / 12)
+      const diff = l.balance_manual - curScheduled
+      return Math.max(0, scheduled + diff)
+    }
+  }
+  return Math.max(0, scheduled)
+}
+
+/** 指定月末時点の負債合計 */
+export function totalLiabilitiesAt(liabilities: LiabilityRow[], month: string, currentMonth: string = thisMonth()): number {
+  return liabilities.reduce((s, l) => s + liabilityBalanceAt(l, month, currentMonth), 0)
+}
+
+export interface NetWorthPoint {
+  month: string
+  assets: number
+  liabilities: number
+  netWorth: number
+}
+
+/** 資産スナップショットのある月ごとの純資産（資産 − 負債） */
+export function netWorthByMonth(assets: AssetRow[], liabilities: LiabilityRow[], currentMonth: string = thisMonth()): NetWorthPoint[] {
+  const snap = assetSnapshotByMonthEnd(assets)
+  return [...snap.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([month, s]) => {
+      const liab = totalLiabilitiesAt(liabilities, month, currentMonth)
+      return { month, assets: s.total, liabilities: liab, netWorth: s.total - liab }
+    })
 }
 
 export interface MonthEndSnapshot {
@@ -199,6 +283,53 @@ export interface PeriodSummary {
 }
 
 /** 期間（from〜to、YYYY-MM両端含む）の収支を集計する */
+export interface LivingCostEstimate {
+  annual: number // 年額の基本生活費（子供費用を除く）
+  months: number // 集計に使った月数
+  otherMonths: number // うちその他支出を算出できた月数
+  childCostDeducted: number // 差し引いた現在の子供費用（年額）
+}
+
+/**
+ * 過去N ヶ月の実支出から基本生活費（年額）を推定する。
+ * (固定費+変動費+その他支出) の月平均 × 12 − 現在の子供費用（年額）
+ * ※プラン側で子供費用を別途加算するため、二重計上にならないよう差し引く
+ */
+export function estimateLivingCost(
+  data: Pick<AllData, 'income' | 'expenses' | 'fixed_costs' | 'assets'> & { furusato_salaries?: AllData['furusato_salaries'] },
+  currentChildCostAnnual: number,
+  months = 12,
+  principalCap: number = DEFAULT_PRINCIPAL_CAP,
+): LivingCostEstimate | null {
+  const to = addMonths(thisMonth(), -1) // 当月は集計途中なので前月まで
+  const from = addMonths(to, -(months - 1))
+  const incMap = effectiveIncomeByMonth(data.income, data.furusato_salaries ?? [])
+  const expMap = expenseByMonth(data.expenses)
+  const breakdown = nonInvestBreakdownByMonth(data.assets, principalCap)
+
+  // 実績として意味のある月＝変動費の記録がある月、またはその他支出を算出できた月
+  // （固定費は毎月あるため判定に使うと、記録の無い月まで平均に含めて過小評価になる）
+  let sum = 0
+  let count = 0
+  let otherMonths = 0
+  for (const m of monthRange(from, to)) {
+    const variable = expMap.get(m)
+    const fixed = fixedMonthlyTotal(data.fixed_costs, m)
+    const other = estimateOtherExpense(incMap.get(m) ?? 0, fixed, variable ?? 0, breakdown.get(m)?.delta)
+    if (variable === undefined && other === null) continue
+    sum += fixed + (variable ?? 0) + (other ?? 0)
+    count++
+    if (other !== null) otherMonths++
+  }
+  if (count === 0) return null
+  return {
+    annual: Math.max(0, Math.round((sum / count) * 12 - currentChildCostAnnual)),
+    months: count,
+    otherMonths,
+    childCostDeducted: Math.round(currentChildCostAnnual),
+  }
+}
+
 export function periodSummary(
   data: Pick<AllData, 'income' | 'expenses' | 'fixed_costs' | 'assets'> & { furusato_salaries?: AllData['furusato_salaries'] },
   from: string,

@@ -7,7 +7,7 @@
  */
 import { getConst } from './constants.ts'
 import type { BonusConfig, FurusatoSalary } from './types.ts'
-import { deductionTotal, estimateSalary, type SalaryEstimate } from './utils.ts'
+import { annualLoanPayment, deductionTotal, estimateSalary, loanBalance, type SalaryEstimate } from './utils.ts'
 
 export interface LifeplanAdult {
   name: string
@@ -73,7 +73,7 @@ export interface LifeplanConfig {
   invest_return: number // %（運用利回り。投資分にのみ複利で適用）
   raise_rate: number // %（昇給率）
   pension_growth: number // %（年金の上昇率。0=受給額は現在の額のまま。物価連動にするならインフレ率と同値）
-  living_cost: number // 基本生活費（年額・現在価格・子供費用を除く）
+  living_cost: number | null // 基本生活費（年額・現在価格・子供費用を除く）。null=実支出から自動推定
   child_multiplier: number // 子供費用の倍率
   start_assets_override: number | null // 開始資産の手動上書き（空なら最新スナップショット）
   adults: LifeplanAdult[]
@@ -87,7 +87,7 @@ export const DEFAULT_LIFEPLAN: LifeplanConfig = {
   invest_return: 3.0,
   raise_rate: 1.0,
   pension_growth: 0,
-  living_cost: 3_000_000,
+  living_cost: null,
   child_multiplier: 1.0,
   start_assets_override: null,
   adults: [],
@@ -113,26 +113,8 @@ export function parseLifeplan(json: string | null | undefined): LifeplanConfig {
   }
 }
 
-/** 住宅ローンの年間返済額（元利均等・固定金利）。rate=%/年、years=返済年数 */
-export function annualLoanPayment(principal: number, ratePct: number, years: number): number {
-  if (principal <= 0 || years <= 0) return 0
-  const r = ratePct / 100
-  if (r === 0) return principal / years
-  const monthly = principal * (r / 12) * Math.pow(1 + r / 12, years * 12) / (Math.pow(1 + r / 12, years * 12) - 1)
-  return monthly * 12
-}
-
-/** ローン残高（返済n年経過後・元利均等） */
-export function loanBalance(principal: number, ratePct: number, years: number, elapsed: number): number {
-  if (elapsed <= 0) return principal
-  if (elapsed >= years) return 0
-  const r = ratePct / 100 / 12
-  const n = years * 12
-  const m = elapsed * 12
-  if (r === 0) return principal * (1 - m / n)
-  const bal = principal * (Math.pow(1 + r, n) - Math.pow(1 + r, m)) / (Math.pow(1 + r, n) - 1)
-  return Math.max(0, bal)
-}
+// ローン計算は utils.ts に実装（負債管理と共用）。既存の import パスを保つため再エクスポート
+export { annualLoanPayment, loanBalance }
 
 /**
  * 子供1人の年間費用（現在価格・児童手当差引前）。
@@ -234,6 +216,7 @@ export interface LifeplanResult {
 /**
  * @param resolvedNet 大人ごとの採用手取り年収（手動 or 給与データからの想定を呼び出し側で解決済み）
  * @param resolvedPension 大人ごとの採用年金額（手動 or 想定。省略時は cfg の手入力値のみ使用）
+ * @param resolvedLiving 採用する基本生活費（cfg.living_cost が null のとき実支出からの推定値を渡す）
  */
 export function simulate(
   cfg: LifeplanConfig,
@@ -242,8 +225,10 @@ export function simulate(
   startYear: number,
   resolvedNet: Record<string, number>,
   resolvedPension?: Record<string, number>,
+  resolvedLiving?: number,
 ): LifeplanResult {
   const rows: LifeplanRow[] = []
+  const livingCost = cfg.living_cost ?? resolvedLiving ?? 0
   let invest = startInvest // 運用利回りが効く投資分
   let liquid = startLiquid // 現金・年金（利回りは効かず、収支の黒字が積み上がる）
   let depletionYear: number | null = null
@@ -298,7 +283,7 @@ export function simulate(
       }
     }
 
-    const living = cfg.living_cost * infl
+    const living = livingCost * infl
     const childNominal = childCost * infl
     const expense = living + childNominal + customOut * infl - Math.min(homeNet, 0) // 住宅の支出分
     const income = salary + pension + customIn * infl + Math.max(homeNet, 0) // 住宅の収入分（家賃控除・ローン控除）

@@ -32,6 +32,36 @@ const NEW_CHILD: LifeplanChild = {
 
 const numOrNull = (s: string) => (s.trim() === '' ? null : Number(s.replace(/[,，]/g, '')) || 0)
 
+/** シナリオの主要条件を短い行の配列に整形（読み込まずに中身を把握するためのプレビュー） */
+function scenarioSummary(cfg: LifeplanConfig): string[] {
+  const lines: string[] = []
+  lines.push(`インフレ ${cfg.inflation}% / 利回り ${cfg.invest_return}% / 昇給 ${cfg.raise_rate}% / 年金上昇 ${cfg.pension_growth ?? 0}%`)
+  lines.push(`基本生活費: ${cfg.living_cost === null ? '実績から自動' : yen(cfg.living_cost)}（子供費用倍率 ${cfg.child_multiplier}）`)
+  if (cfg.adults.length) {
+    lines.push(
+      '大人: ' +
+        cfg.adults
+          .map((a) => `${a.name}${a.income_enabled ? '' : '(収入なし)'}${a.birth_year ? `・${a.birth_year}生` : ''}`)
+          .join(' / '),
+    )
+  }
+  if (cfg.children.length) {
+    lines.push(
+      `子供${cfg.children.length}人: ` +
+        cfg.children
+          .map((c) => `${c.birth_year}生・${c.path}${c.path !== '高卒' ? `(${c.college})` : ''}`)
+          .join(' / '),
+    )
+  }
+  if (cfg.home?.enabled) {
+    lines.push(`マイホーム: ${cfg.home.buy_year}年に${yen(cfg.home.price)}（頭金${yen(cfg.home.down_payment)}・${cfg.home.interest_rate}%・${cfg.home.loan_years}年）`)
+  }
+  if (cfg.custom_flows.length) {
+    lines.push('カスタム収支: ' + cfg.custom_flows.map((f) => f.label || '（無名）').join('、'))
+  }
+  return lines
+}
+
 /** 小数を途中入力できる数値欄（「0.」「1.5」などの入力中も値が消えない） */
 function DecimalField({ label, value, onChange, help }: { label: string; value: number; onChange: (v: number) => void; help?: ReactNode }) {
   const [text, setText] = useState(String(value))
@@ -64,6 +94,7 @@ export default function Lifeplan() {
   const [msg, setMsg] = useState('')
   const [scenarioName, setScenarioName] = useState('')
   const [compareName, setCompareName] = useState('')
+  const [renaming, setRenaming] = useState<{ from: string; to: string } | null>(null)
 
   const persons = useMemo(() => {
     const raw = data?.settings.find((s) => s.key === 'furusato_persons')?.value
@@ -194,11 +225,18 @@ export default function Lifeplan() {
   })
   const tickOpts = { maxTicksLimit: 9, maxRotation: 0 as const }
 
+  const persistScenarios = (list: Array<{ name: string; config: LifeplanConfig }>) =>
+    mutate('setSetting', { row: { key: 'lifeplan_scenarios', value: JSON.stringify(list) } })
+
   const saveScenario = async () => {
     const name = scenarioName.trim()
     if (!name || !cfg) return
-    const next = [...scenarios.filter((s) => s.name !== name), { name, config: cfg }]
-    await mutate('setSetting', { row: { key: 'lifeplan_scenarios', value: JSON.stringify(next) } })
+    // 同名は上書き（順序は保持）、無ければ末尾に追加
+    const exists = scenarios.some((s) => s.name === name)
+    const next = exists
+      ? scenarios.map((s) => (s.name === name ? { name, config: cfg } : s))
+      : [...scenarios, { name, config: cfg }]
+    await persistScenarios(next)
     setScenarioName('')
     setMsg(`シナリオ「${name}」を保存しました ✓`)
   }
@@ -213,8 +251,34 @@ export default function Lifeplan() {
 
   const deleteScenario = async (name: string) => {
     if (!window.confirm(`シナリオ「${name}」を削除しますか？`)) return
-    await mutate('setSetting', { row: { key: 'lifeplan_scenarios', value: JSON.stringify(scenarios.filter((s) => s.name !== name)) } })
+    await persistScenarios(scenarios.filter((s) => s.name !== name))
     if (compareName === name) setCompareName('')
+  }
+
+  // 名称のみ変更（config は不変）
+  const renameScenario = async () => {
+    if (!renaming) return
+    const to = renaming.to.trim()
+    if (!to || to === renaming.from) {
+      setRenaming(null)
+      return
+    }
+    if (scenarios.some((s) => s.name === to)) {
+      window.alert(`「${to}」はすでに存在します。別の名前にしてください。`)
+      return
+    }
+    await persistScenarios(scenarios.map((s) => (s.name === renaming.from ? { ...s, name: to } : s)))
+    if (compareName === renaming.from) setCompareName(to)
+    setRenaming(null)
+  }
+
+  // 並び替え（index i を dir 方向へ）
+  const moveScenario = async (i: number, dir: -1 | 1) => {
+    const j = i + dir
+    if (j < 0 || j >= scenarios.length) return
+    const next = [...scenarios]
+    ;[next[i], next[j]] = [next[j], next[i]]
+    await persistScenarios(next)
   }
 
   const last = result.rows[result.rows.length - 1]
@@ -244,11 +308,30 @@ export default function Lifeplan() {
                 {scenarios.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}
               </select></label>
             <ul className="list">
-              {scenarios.map((s) => (
-                <li key={s.name}>
-                  <span style={{ flex: 1, fontSize: 13 }}>{s.name}</span>
-                  <button className="btn small secondary" onClick={() => loadScenario(s.name)}>読込</button>
-                  <button className="btn danger small" onClick={() => void deleteScenario(s.name)}>削除</button>
+              {scenarios.map((s, i) => (
+                <li key={s.name} style={{ flexWrap: 'wrap', rowGap: 4 }}>
+                  {renaming?.from === s.name ? (
+                    <>
+                      <input type="text" style={{ flex: '1 1 120px', marginTop: 0 }} value={renaming.to}
+                        onChange={(e) => setRenaming({ from: s.name, to: e.target.value })} autoFocus />
+                      <button className="btn small" style={{ width: 'auto' }} disabled={saving} onClick={() => void renameScenario()}>確定</button>
+                      <button className="btn small secondary" onClick={() => setRenaming(null)}>取消</button>
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ flex: '1 1 100px', fontSize: 13 }}>{s.name}</span>
+                      <button className="btn small secondary" style={{ padding: '4px 8px' }} disabled={i === 0 || saving} onClick={() => void moveScenario(i, -1)} title="上へ">▲</button>
+                      <button className="btn small secondary" style={{ padding: '4px 8px' }} disabled={i === scenarios.length - 1 || saving} onClick={() => void moveScenario(i, 1)} title="下へ">▼</button>
+                      <HelpTip title={`条件: ${s.name}`} label="条件">
+                        {scenarioSummary(s.config).map((line, k) => (
+                          <div key={k} style={{ marginBottom: 2 }}>{line}</div>
+                        ))}
+                      </HelpTip>
+                      <button className="btn small secondary" onClick={() => loadScenario(s.name)}>読込</button>
+                      <button className="btn small secondary" onClick={() => setRenaming({ from: s.name, to: s.name })}>改名</button>
+                      <button className="btn danger small" onClick={() => void deleteScenario(s.name)}>削除</button>
+                    </>
+                  )}
                 </li>
               ))}
             </ul>

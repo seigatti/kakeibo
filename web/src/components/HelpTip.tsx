@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
  * 「？」ボタン。タップでその場に説明バブルを表示する（モバイル前提なのでクリック開閉）。
  * 画面右寄りにあるときはバブルを右揃えにしてはみ出しを防ぐ。
  */
-export default function HelpTip({ title, children }: { title?: string; children: ReactNode }) {
+export default function HelpTip({ title, children, label }: { title?: string; children: ReactNode; label?: string }) {
   const [open, setOpen] = useState(false)
   const [alignRight, setAlignRight] = useState(false)
   const ref = useRef<HTMLSpanElement>(null)
@@ -29,7 +29,7 @@ export default function HelpTip({ title, children }: { title?: string; children:
 
   return (
     <span className="helptip" ref={ref}>
-      <button type="button" className="helptip-btn" onClick={toggle} aria-label="説明を表示">?</button>
+      <button type="button" className={label ? 'btn small secondary' : 'helptip-btn'} onClick={toggle} aria-label={label ?? '説明を表示'}>{label ?? '?'}</button>
       {open && (
         <span className={alignRight ? 'helptip-pop right' : 'helptip-pop'} onClick={(e) => e.stopPropagation()}>
           {title && <b style={{ display: 'block', marginBottom: 4 }}>{title}</b>}

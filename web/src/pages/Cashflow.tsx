@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Chart, Line } from 'react-chartjs-2'
 import { useStore } from '../store'
-import { DEFAULT_CATEGORIES } from '../types'
+import { CONSUMPTION_UNITS, DEFAULT_CATEGORIES } from '../types'
 import HelpTip from '../components/HelpTip'
 import { DEFAULT_PERSONS } from '../types'
 import { addMonths, amt, categoryStats, dataMonthRange, DEFAULT_PRINCIPAL_CAP, effectiveIncomeByMonth, estimateOtherExpense, expenseByMonth, fixedMonthlyTotal, monthRange, netSalaryByMonth, nonInvestBreakdownByMonth, thisMonth, yen, yenShort } from '../utils'
@@ -16,6 +16,7 @@ export default function Cashflow() {
   const [salary, setSalary] = useState('')
   const [other, setOther] = useState('')
   const [amounts, setAmounts] = useState<Record<string, string>>({})
+  const [quantities, setQuantities] = useState<Record<string, string>>({})
   const [newCat, setNewCat] = useState('')
   const [extraCats, setExtraCats] = useState<string[]>([])
   const [msg, setMsg] = useState('')
@@ -45,6 +46,9 @@ export default function Cashflow() {
     const map: Record<string, string> = {}
     for (const e of data.expenses.filter((e) => e.month === month)) map[e.category] = String(e.amount)
     setAmounts(map)
+    const qmap: Record<string, string> = {}
+    for (const c of data.consumption?.filter((c) => c.month === month) ?? []) qmap[c.category] = String(c.quantity)
+    setQuantities(qmap)
   }, [data, month])
 
   const num = (s: string | undefined) => (!s || s.trim() === '' ? null : Number(s.replace(/[,，]/g, '')))
@@ -69,6 +73,7 @@ export default function Cashflow() {
     await mutate('setMonthData', {
       income: { month, salary: num(salary), other: num(other), memo: null },
       expenses: categories.map((c) => ({ month, category: c, amount: num(amounts[c]) })),
+      consumption: Object.keys(CONSUMPTION_UNITS).map((c) => ({ month, category: c, quantity: num(quantities[c]) })),
     })
     setMsg(`${month} の収支を保存しました`)
   }
@@ -92,6 +97,20 @@ export default function Cashflow() {
       byCat.get(e.category)!.set(e.month, e.amount)
     }
     return byCat
+  }, [data])
+
+  // 消費量・単価（円/単位）の月次シリーズ（記録のあるカテゴリのみ）
+  const consumptionCats = useMemo(() => {
+    const has = new Set((data?.consumption ?? []).filter((c) => c.quantity > 0).map((c) => c.category))
+    return Object.keys(CONSUMPTION_UNITS).filter((c) => has.has(c))
+  }, [data])
+  const qtyByCat = useMemo(() => {
+    const m = new Map<string, Map<string, number>>()
+    for (const c of data?.consumption ?? []) {
+      if (!m.has(c.category)) m.set(c.category, new Map())
+      m.get(c.category)!.set(c.month, c.quantity)
+    }
+    return m
   }, [data])
 
   // カテゴリ別の期間集計
@@ -152,12 +171,21 @@ export default function Cashflow() {
           <label className="field">その他収入
             <input type="text" inputMode="numeric" value={other} onChange={(e) => setOther(e.target.value)} /></label>
         </div>
-        <h2 style={{ marginTop: 6 }}>変動費</h2>
+        <h2 style={{ marginTop: 6 }}>
+          変動費
+          <HelpTip title="消費量">電気・水道・ガス・ガソリンは金額の下に消費量（kWh・m³・L）も入力できます。金額÷消費量で単価（円/kWh等）を計算し、下のグラフで推移を確認できます。</HelpTip>
+        </h2>
         <div className="row2">
           {categories.map((c) => (
             <label className="field" key={c}>{c}
               <input type="text" inputMode="numeric" value={amounts[c] ?? ''}
                 onChange={(e) => setAmounts({ ...amounts, [c]: e.target.value })} />
+              {CONSUMPTION_UNITS[c] && (
+                <input type="text" inputMode="decimal" style={{ marginTop: 4 }}
+                  placeholder={`消費量（${CONSUMPTION_UNITS[c]}）`}
+                  value={quantities[c] ?? ''}
+                  onChange={(e) => setQuantities({ ...quantities, [c]: e.target.value })} />
+              )}
             </label>
           ))}
         </div>
@@ -378,6 +406,64 @@ export default function Cashflow() {
               </div>
             )}
           </div>
+
+          {consumptionCats.length > 0 && (
+            <>
+              <div className="card">
+                <h2>
+                  消費量の推移
+                  <HelpTip title="消費量の推移">収支入力で記録した電気(kWh)・水道(m³)・ガス(m³)・ガソリン(L)の使用量の推移です。単位が混在するので値の絶対量ではなく各線の増減で傾向を見てください。</HelpTip>
+                </h2>
+                <div className="chart-box">
+                  <Line
+                    data={{
+                      labels: chartMonths.map((m) => m.slice(2)),
+                      datasets: consumptionCats.map((cat, i) => ({
+                        label: `${cat}(${CONSUMPTION_UNITS[cat]})`,
+                        data: chartMonths.map((m) => qtyByCat.get(cat)?.get(m) ?? null),
+                        borderColor: PALETTE[i % PALETTE.length],
+                        tension: 0.3,
+                      })),
+                    }}
+                    options={{
+                      maintainAspectRatio: false,
+                      spanGaps: true,
+                      interaction: { mode: 'index', intersect: false },
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className="card">
+                <h2>
+                  単価の推移（円/単位）
+                  <HelpTip title="単価">その月の金額 ÷ 消費量です（例: 電気代 ÷ kWh = 円/kWh）。燃料費調整や料金改定による単価の変動を確認できます。金額・消費量の両方を記録した月だけ表示されます。</HelpTip>
+                </h2>
+                <div className="chart-box">
+                  <Line
+                    data={{
+                      labels: chartMonths.map((m) => m.slice(2)),
+                      datasets: consumptionCats.map((cat, i) => ({
+                        label: `${cat}(円/${CONSUMPTION_UNITS[cat]})`,
+                        data: chartMonths.map((m) => {
+                          const q = qtyByCat.get(cat)?.get(m)
+                          const amount = (data?.expenses ?? []).find((e) => e.month === m && e.category === cat)?.amount
+                          return q && q > 0 && amount ? Math.round((amount / q) * 10) / 10 : null
+                        }),
+                        borderColor: PALETTE[i % PALETTE.length],
+                        tension: 0.3,
+                      })),
+                    }}
+                    options={{
+                      maintainAspectRatio: false,
+                      spanGaps: true,
+                      interaction: { mode: 'index', intersect: false },
+                    }}
+                  />
+                </div>
+              </div>
+            </>
+          )}
         </>
       )}
     </>

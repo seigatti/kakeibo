@@ -22,6 +22,7 @@ var SHEET_DEFS = {
   furusato_years: ['person', 'year', 'income', 'social_insurance', 'medical_deduction', 'limit_manual', 'memo', 'bonus_base', 'bonus_config', 'life_paid', 'quake_paid', 'medical_paid'],
   furusato_salaries: ['person', 'year', 'month', 'gross', 'health', 'pension_ins', 'employment', 'income_tax', 'resident_tax', 'care_ins'],
   liabilities: ['id', 'name', 'kind', 'principal', 'start_month', 'rate', 'years', 'balance_manual', 'memo'],
+  consumption: ['month', 'category', 'quantity'],
   memos: ['id', 'text', 'updated_at'],
   settings: ['key', 'value'],
 };
@@ -102,13 +103,20 @@ function handleAction_(body) {
     case 'setIncome':
       upsertRow_('income', 'month', body.row);
       return getAllData_();
-    case 'setMonthData': // 1ヶ月分の収入+変動費をまとめて保存（PWAの収支入力用）
+    case 'setMonthData': // 1ヶ月分の収入+変動費(+消費量)をまとめて保存（PWAの収支入力用）
       if (body.income) upsertRow_('income', 'month', body.income);
       (body.expenses || []).forEach(function (row) {
         if (row.amount === null || row.amount === '' || row.amount === undefined) {
           deleteRows_('expenses', function (r) { return r.month === row.month && r.category === row.category; });
         } else {
           upsertRow_('expenses', ['month', 'category'], row);
+        }
+      });
+      (body.consumption || []).forEach(function (row) {
+        if (row.quantity === null || row.quantity === '' || row.quantity === undefined) {
+          deleteRows_('consumption', function (r) { return r.month === row.month && r.category === row.category; });
+        } else {
+          upsertRow_('consumption', ['month', 'category'], row);
         }
       });
       return getAllData_();

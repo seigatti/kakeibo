@@ -136,7 +136,22 @@ export interface AllData {
   furusato_salaries?: FurusatoSalary[]
   memos?: MemoRow[]
   liabilities?: LiabilityRow[]
+  consumption?: ConsumptionRow[]
   settings: SettingRow[]
 }
 
 export const DEFAULT_CATEGORIES = ['ガス代', '電気代', '上下水道', 'ガソリン代', '高速料金', 'ケータイ料金']
+
+export interface ConsumptionRow {
+  month: string // YYYY-MM
+  category: string
+  quantity: number
+}
+
+/** 消費量を記録するカテゴリと単位（円/単位 の計算にも使う） */
+export const CONSUMPTION_UNITS: Record<string, string> = {
+  電気代: 'kWh',
+  上下水道: 'm³',
+  ガス代: 'm³',
+  ガソリン代: 'L',
+}

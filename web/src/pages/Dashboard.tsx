@@ -4,6 +4,7 @@ import HelpTip from '../components/HelpTip'
 import { useStore } from '../store'
 import {
   addMonths,
+  assetAllocationTrend,
   assetTotal,
   DEFAULT_PRINCIPAL_CAP,
   effectiveIncomeByMonth,
@@ -97,6 +98,7 @@ export default function Dashboard() {
     ].filter((a) => a.value > 0)
     return { items, total: items.reduce((s, a) => s + a.value, 0) }
   })()
+  const allocTrend = assetAllocationTrend(data.assets).slice(-24)
 
   // 負債・純資産
   const liabilities = data.liabilities ?? []
@@ -175,6 +177,39 @@ export default function Dashboard() {
                 <span>{yen(a.value)}</span>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {allocTrend.length >= 2 && (
+        <div className="card">
+          <h2>
+            資産配分の推移
+            <HelpTip title="資産配分の推移">
+              各資産記録時点での投資・現金・年金の構成比（%）の推移です。合計が100%になります。
+              現金比率が下がって投資比率が上がっている、などの傾向がわかります。
+            </HelpTip>
+          </h2>
+          <div className="chart-box small">
+            <Line
+              data={{
+                labels: allocTrend.map((p) => p.month.slice(2)),
+                datasets: [
+                  { label: '投資', data: allocTrend.map((p) => p.investPct), borderColor: '#4ade80', tension: 0.3, pointRadius: 0 },
+                  { label: '現金', data: allocTrend.map((p) => p.cashPct), borderColor: '#38bdf8', tension: 0.3, pointRadius: 0 },
+                  { label: '年金', data: allocTrend.map((p) => p.pensionPct), borderColor: '#c084fc', tension: 0.3, pointRadius: 0 },
+                ],
+              }}
+              options={{
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                scales: { y: { min: 0, max: 100, ticks: { callback: (v) => `${v}%` } }, x: { ticks: { maxTicksLimit: 8, maxRotation: 0 } } },
+                plugins: {
+                  datalabels: { display: false },
+                  tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y}%` } },
+                },
+              }}
+            />
           </div>
         </div>
       )}

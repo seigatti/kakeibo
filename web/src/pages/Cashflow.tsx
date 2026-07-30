@@ -4,7 +4,7 @@ import { useStore } from '../store'
 import { DEFAULT_CATEGORIES } from '../types'
 import HelpTip from '../components/HelpTip'
 import { DEFAULT_PERSONS } from '../types'
-import { addMonths, amt, dataMonthRange, DEFAULT_PRINCIPAL_CAP, effectiveIncomeByMonth, estimateOtherExpense, expenseByMonth, fixedMonthlyTotal, netSalaryByMonth, nonInvestBreakdownByMonth, thisMonth, yen, yenShort } from '../utils'
+import { addMonths, amt, categoryStats, dataMonthRange, DEFAULT_PRINCIPAL_CAP, effectiveIncomeByMonth, estimateOtherExpense, expenseByMonth, fixedMonthlyTotal, monthRange, netSalaryByMonth, nonInvestBreakdownByMonth, thisMonth, yen, yenShort } from '../utils'
 import CsvImportCard from './CsvImportCard'
 import SalaryCard from './SalaryCard'
 
@@ -19,6 +19,9 @@ export default function Cashflow() {
   const [newCat, setNewCat] = useState('')
   const [extraCats, setExtraCats] = useState<string[]>([])
   const [msg, setMsg] = useState('')
+  const [statPreset, setStatPreset] = useState<'year' | '12m' | 'all' | 'custom'>('12m')
+  const [statFrom, setStatFrom] = useState('')
+  const [statTo, setStatTo] = useState('')
 
   const persons = useMemo(() => {
     const raw = data?.settings.find((s) => s.key === 'furusato_persons')?.value
@@ -90,6 +93,23 @@ export default function Cashflow() {
     }
     return byCat
   }, [data])
+
+  // カテゴリ別の期間集計
+  const earliestMonth = useMemo(() => {
+    const ms = [...(data?.expenses ?? []).map((e) => e.month)]
+    return ms.length ? ms.sort()[0] : thisMonth()
+  }, [data])
+  const [statRangeFrom, statRangeTo] = useMemo((): [string, string] => {
+    const now = thisMonth()
+    if (statPreset === 'year') return [`${now.slice(0, 4)}-01`, now]
+    if (statPreset === '12m') return [addMonths(now, -11), now]
+    if (statPreset === 'custom' && statFrom && statTo) return [statFrom, statTo]
+    return [earliestMonth, now]
+  }, [statPreset, statFrom, statTo, earliestMonth])
+  const stats = useMemo(
+    () => (data ? categoryStats(data.expenses, monthRange(statRangeFrom, statRangeTo)) : []),
+    [data, statRangeFrom, statRangeTo],
+  )
 
   // その他支出の推計: 収入 − 固定費 − 変動費 − 非投資の資産増減（Δ現金＋Δ投資元本。年金は除外）
   // |Δ投資元本| がしきい値を超える月は売買とみなし Δ元本を除外（設定 principal_cap で変更可）
@@ -305,38 +325,59 @@ export default function Cashflow() {
             </div>
           </div>
 
-          {(data?.zaim_net.length ?? 0) >= 2 && (
-            <div className="card">
-              <h2>
-                現金収支の推移（Zaim転記・過去データ）
-                <HelpTip title="このグラフについて">
-                  Excel時代にZaimの「分析＞月ごと」から転記していた現金ベースの月次収支（投資除く）の記録です。
-                  移行した過去データ（2023-09〜2024-08）のみで、現在は更新されません。
-                  現在の全体像は上の「収入 vs 全支出（投資除く）」で確認できます。
-                </HelpTip>
-              </h2>
-              <div className="chart-box small">
-                <Line
-                  data={{
-                    labels: data!.zaim_net.map((z) => z.month.slice(2)),
-                    datasets: [{
-                      label: '現金収支',
-                      data: data!.zaim_net.map((z) => z.amount),
-                      borderColor: '#38bdf8',
-                      backgroundColor: 'rgba(56, 189, 248, 0.15)',
-                      fill: true,
-                      tension: 0.3,
-                    }],
-                  }}
-                  options={{
-                    maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
-                    scales: { y: { ticks: { callback: (v) => yenShort(Number(v)) } } },
-                  }}
-                />
-              </div>
+          <div className="card">
+            <h2>
+              カテゴリ別の集計（期間指定）
+              <HelpTip title="カテゴリ別の集計">
+                指定した期間の変動費カテゴリごとに、合計・平均・最大・最小・記録した月数を表示します。
+                平均は「記録のある月」で割った値です（金額を入れなかった月は分母に含みません）。
+              </HelpTip>
+            </h2>
+            <div className="seg">
+              {([['year', '今年'], ['12m', '過去12ヶ月'], ['all', '全期間'], ['custom', '期間指定']] as const).map(([p, label]) => (
+                <button key={p} className={statPreset === p ? 'on' : ''} onClick={() => setStatPreset(p)}>{label}</button>
+              ))}
             </div>
-          )}
+            {statPreset === 'custom' && (
+              <div className="row2">
+                <label className="field">開始月
+                  <input type="month" value={statFrom || earliestMonth} onChange={(e) => setStatFrom(e.target.value)} /></label>
+                <label className="field">終了月
+                  <input type="month" value={statTo || thisMonth()} onChange={(e) => setStatTo(e.target.value)} /></label>
+              </div>
+            )}
+            <p className="muted" style={{ fontSize: 12, margin: '0 0 6px' }}>{statRangeFrom} 〜 {statRangeTo}</p>
+            {stats.length === 0 ? (
+              <p className="muted" style={{ fontSize: 13 }}>この期間に変動費の記録がありません</p>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ fontSize: 12, borderCollapse: 'collapse', whiteSpace: 'nowrap', width: '100%' }}>
+                  <thead>
+                    <tr className="muted">
+                      <th style={{ padding: 4, textAlign: 'left' }}>カテゴリ</th>
+                      <th style={{ padding: 4, textAlign: 'right' }}>合計</th>
+                      <th style={{ padding: 4, textAlign: 'right' }}>平均</th>
+                      <th style={{ padding: 4, textAlign: 'right' }}>最大</th>
+                      <th style={{ padding: 4, textAlign: 'right' }}>最小</th>
+                      <th style={{ padding: 4, textAlign: 'right' }}>月数</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stats.map((s) => (
+                      <tr key={s.category} style={{ borderTop: '1px solid var(--border)' }}>
+                        <td style={{ padding: 4 }}>{s.category}</td>
+                        <td style={{ padding: 4, textAlign: 'right' }}>{yen(s.total)}</td>
+                        <td style={{ padding: 4, textAlign: 'right' }}>{yen(s.avg)}</td>
+                        <td style={{ padding: 4, textAlign: 'right' }}>{yen(s.max)}</td>
+                        <td style={{ padding: 4, textAlign: 'right' }}>{yen(s.min)}</td>
+                        <td style={{ padding: 4, textAlign: 'right' }}>{s.count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </>
       )}
     </>

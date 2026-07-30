@@ -290,6 +290,66 @@ export interface LivingCostEstimate {
   childCostDeducted: number // 差し引いた現在の子供費用（年額）
 }
 
+export interface CategoryStat {
+  category: string
+  total: number
+  avg: number // 記録のある月の平均
+  max: number
+  min: number
+  count: number // 記録のある月数
+}
+
+/** 期間（months）内のカテゴリ別統計（合計/平均/最大/最小/月数）。合計の降順 */
+export function categoryStats(expenses: ExpenseRow[], months: string[]): CategoryStat[] {
+  const set = new Set(months)
+  const byCat = new Map<string, number[]>()
+  for (const e of expenses) {
+    if (!set.has(e.month)) continue
+    if (!byCat.has(e.category)) byCat.set(e.category, [])
+    byCat.get(e.category)!.push(e.amount)
+  }
+  const out: CategoryStat[] = []
+  for (const [category, vals] of byCat) {
+    if (vals.length === 0) continue
+    const total = vals.reduce((s, v) => s + v, 0)
+    out.push({
+      category,
+      total,
+      avg: Math.round(total / vals.length),
+      max: Math.max(...vals),
+      min: Math.min(...vals),
+      count: vals.length,
+    })
+  }
+  return out.sort((a, b) => b.total - a.total)
+}
+
+export interface AllocationPoint {
+  month: string
+  investPct: number
+  cashPct: number
+  pensionPct: number
+}
+
+/** 各資産スナップショットの投資/現金/年金の構成比（%）の推移。全項目0の記録はスキップ */
+export function assetAllocationTrend(assets: AssetRow[]): AllocationPoint[] {
+  return sortedAssets(assets)
+    .map((a) => {
+      const inv = a.investment ?? 0
+      const cash = a.cash ?? 0
+      const pen = a.pension ?? 0
+      const t = inv + cash + pen
+      if (t <= 0) return null
+      return {
+        month: a.date.slice(0, 7),
+        investPct: Math.round((inv / t) * 1000) / 10,
+        cashPct: Math.round((cash / t) * 1000) / 10,
+        pensionPct: Math.round((pen / t) * 1000) / 10,
+      }
+    })
+    .filter((p): p is AllocationPoint => p !== null)
+}
+
 /**
  * 過去N ヶ月の実支出から基本生活費（年額）を推定する。
  * (固定費+変動費+その他支出) の月平均 × 12 − 現在の子供費用（年額）

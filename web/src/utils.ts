@@ -295,7 +295,7 @@ export interface CategoryStat {
   total: number
   avg: number // 記録のある月の平均
   max: number
-  min: number
+  min: number // 0より大きい値のうちの最小（全て0なら0）
   count: number // 記録のある月数
 }
 
@@ -312,12 +312,13 @@ export function categoryStats(expenses: ExpenseRow[], months: string[]): Categor
   for (const [category, vals] of byCat) {
     if (vals.length === 0) continue
     const total = vals.reduce((s, v) => s + v, 0)
+    const positives = vals.filter((v) => v > 0)
     out.push({
       category,
       total,
       avg: Math.round(total / vals.length),
       max: Math.max(...vals),
-      min: Math.min(...vals),
+      min: positives.length ? Math.min(...positives) : 0, // 0より大きい値のうちの最小（全て0なら0）
       count: vals.length,
     })
   }

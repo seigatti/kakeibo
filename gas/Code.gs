@@ -12,7 +12,7 @@
  */
 
 var SHEET_DEFS = {
-  assets: ['date', 'investment', 'cash', 'pension', 'mf_profit', 'memo'],
+  assets: ['date', 'investment', 'cash', 'pension', 'mf_profit', 'memo', 'monthly_gain'],
   expenses: ['month', 'category', 'amount'],
   fixed_costs: ['id', 'name', 'amount', 'frequency', 'start_month', 'end_month', 'memo'],
   income: ['month', 'salary', 'other', 'memo'],

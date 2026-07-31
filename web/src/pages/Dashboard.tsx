@@ -124,8 +124,12 @@ export default function Dashboard() {
               <div className="kv"><span className="muted">現金（Zaim）</span><span>{yen(latest.cash)}</span></div>
               <div className="kv"><span className="muted">年金</span><span>{yen(latest.pension)}</span></div>
               {latest.mf_profit !== null && (
-                <div className="kv"><span className="muted">評価損益</span>
+                <div className="kv"><span className="muted">評価損益（累計）</span>
                   <span className={latest.mf_profit >= 0 ? 'pos' : 'neg'}>{yen(latest.mf_profit)}</span></div>
+              )}
+              {latest.monthly_gain !== null && (
+                <div className="kv"><span className="muted">今月の投資増減</span>
+                  <span className={latest.monthly_gain >= 0 ? 'pos' : 'neg'}>{latest.monthly_gain >= 0 ? '+' : ''}{yen(latest.monthly_gain)}</span></div>
               )}
             </div>
           </>

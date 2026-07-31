@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Line } from 'react-chartjs-2'
+import { Bar, Line } from 'react-chartjs-2'
+import HelpTip from '../components/HelpTip'
 import { useStore } from '../store'
 import { assetTotal, sortedAssets, today, yen, yenShort } from '../utils'
 import LiabilityCard from './LiabilityCard'
 
 type Range = '1y' | '3y' | 'all'
 
-const PREFILL_KEYS = ['investment', 'cash', 'pension', 'profit'] as const
+const PREFILL_KEYS = ['investment', 'cash', 'pension', 'profit', 'gain'] as const
 
 export default function Assets({ prefill }: { prefill: URLSearchParams }) {
   const { data, mutate, saving } = useStore()
@@ -15,6 +16,7 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
   const [cash, setCash] = useState('')
   const [pension, setPension] = useState('')
   const [profit, setProfit] = useState('')
+  const [gain, setGain] = useState('')
   const [memo, setMemo] = useState('')
   const [range, setRange] = useState<Range>('1y')
   const [msg, setMsg] = useState('')
@@ -32,6 +34,7 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
     setCash(overrides?.cash ?? hit?.cash?.toString() ?? '')
     setPension(overrides?.pension ?? hit?.pension?.toString() ?? '')
     setProfit(overrides?.profit ?? hit?.mf_profit?.toString() ?? '')
+    setGain(overrides?.gain ?? hit?.monthly_gain?.toString() ?? '')
     setMemo(hit?.memo ?? '')
   }
 
@@ -57,6 +60,7 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
         cash: overrides.cash !== undefined ? num(overrides.cash) : (hit?.cash ?? null),
         pension: overrides.pension !== undefined ? num(overrides.pension) : (hit?.pension ?? null),
         mf_profit: overrides.profit !== undefined ? num(overrides.profit) : (hit?.mf_profit ?? null),
+        monthly_gain: overrides.gain !== undefined ? num(overrides.gain) : (hit?.monthly_gain ?? null),
         memo: hit?.memo ?? '自動記録',
       }
       mutate('upsertAsset', { row })
@@ -80,10 +84,17 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
 
   const profits = filtered.filter((a) => a.mf_profit !== null)
 
+  // 今月の投資増減: 月ごとに最後の記録（月末値）を採用して棒グラフ化
+  const gains = useMemo(() => {
+    const byMonth = new Map<string, number>()
+    for (const a of filtered) if (a.monthly_gain !== null) byMonth.set(a.date.slice(0, 7), a.monthly_gain)
+    return [...byMonth.entries()].sort(([a], [b]) => a.localeCompare(b))
+  }, [filtered])
+
   const save = async () => {
     setMsg('')
     await mutate('upsertAsset', {
-      row: { date, investment: num(investment), cash: num(cash), pension: num(pension), mf_profit: num(profit), memo: memo || null },
+      row: { date, investment: num(investment), cash: num(cash), pension: num(pension), mf_profit: num(profit), monthly_gain: num(gain), memo: memo || null },
     })
     setMsg(`${date} の記録を保存しました`)
   }
@@ -114,9 +125,15 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
         <div className="row2">
           <label className="field">年金
             <input type="text" inputMode="numeric" placeholder="任意" value={pension} onChange={(e) => setPension(e.target.value)} /></label>
-          <label className="field">評価損益（投資利益）
+          <label className="field">評価損益（投資利益・累計）
             <input type="text" inputMode="numeric" placeholder="任意" value={profit} onChange={(e) => setProfit(e.target.value)} /></label>
         </div>
+        <label className="field">
+          今月の投資増減
+          <HelpTip title="今月の投資増減">
+            マネフォの「今月の増減」＝マネフォに登録した投資系資産（投信・株・年金・外貨など）の前月比です。値動きだけでなく、その月の積立入金による増加分も含みます。マネフォ用ブックマークレットで自動入力されます。
+          </HelpTip>
+          <input type="text" inputMode="numeric" placeholder="任意（例: +355766）" value={gain} onChange={(e) => setGain(e.target.value)} /></label>
         <label className="field">メモ<input type="text" value={memo} onChange={(e) => setMemo(e.target.value)} /></label>
         <button className="btn" onClick={() => void save()} disabled={saving}>{saving ? '保存中…' : '保存'}</button>
         {msg && <p className="pos center" style={{ margin: '8px 0 0' }}>{msg}</p>}
@@ -166,6 +183,34 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
                 }],
               }}
               options={{ ...lineOpts, plugins: { legend: { display: false } } }}
+            />
+          </div>
+        </div>
+      )}
+
+      {gains.length >= 2 && (
+        <div className="card">
+          <h2>
+            今月の投資増減の推移
+            <HelpTip title="今月の投資増減の推移">
+              各月の最後の記録時点での「今月の増減」（マネフォ投資系資産の前月比）です。月ごとにどれだけ増えた/減ったかの推移を表します。
+            </HelpTip>
+          </h2>
+          <div className="chart-box small">
+            <Bar
+              data={{
+                labels: gains.map(([m]) => m.slice(2)),
+                datasets: [{
+                  label: '今月の投資増減',
+                  data: gains.map(([, v]) => v),
+                  backgroundColor: gains.map(([, v]) => (v >= 0 ? '#4ade80' : '#f87171')),
+                }],
+              }}
+              options={{
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: { y: { ticks: { callback: (v) => yenShort(Number(v)) } } },
+              }}
             />
           </div>
         </div>

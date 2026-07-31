@@ -17,10 +17,11 @@ var g=function(re){var m=t.match(re);return m?m[1].replace(/[,，]/g,''):''};
 var total=g(/(?:資産総額|総資産)[^0-9\\-]*([0-9,]+)\\s*円/);
 var prof=g(/評価損益[^0-9+\\-]*([+\\-]?[0-9,]+)\\s*円/);
 var pen=g(/年金[^0-9\\-]*([0-9,]+)\\s*円/);
+var gain=g(/今月[^%]*%[^0-9+\\-]*([+\\-]?[0-9,]+)\\s*円/);
 if(!total)total=prompt('総資産を自動検出できませんでした。金額を貼り付けてください','')||'';
 if(!total)return;
 var inv=pen?String(Number(total)-Number(pen)):total;
-var u='${appUrl}#assets?investment='+inv+(prof?'&profit='+prof:'')+(pen?'&pension='+pen:'')+'&autosave=1';
+var u='${appUrl}#assets?investment='+inv+(prof?'&profit='+prof:'')+(pen?'&pension='+pen:'')+(gain?'&gain='+encodeURIComponent(gain):'')+'&autosave=1';
 var w=window.open(u,'_blank');
 if(!w)location.href=u;
 })()`

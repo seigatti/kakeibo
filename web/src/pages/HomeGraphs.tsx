@@ -1,8 +1,9 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Bar, Chart, Doughnut, Line } from 'react-chartjs-2'
 import HelpTip from '../components/HelpTip'
 import { CONSUMPTION_UNITS, type AllData } from '../types'
 import {
+  addMonths,
   assetAllocationTrend,
   assetTotal,
   DEFAULT_PRINCIPAL_CAP,
@@ -17,6 +18,7 @@ import {
   netWorthByMonth,
   nonInvestBreakdownByMonth,
   otherIncomeByMonth,
+  periodSummary,
   savingsRateByMonth,
   sortedAssets,
   thisMonth,
@@ -24,6 +26,8 @@ import {
   yen,
   yenShort,
 } from '../utils'
+
+type Preset = 'year' | '12m' | 'all' | 'custom'
 
 const PALETTE = ['#38bdf8', '#4ade80', '#fbbf24', '#f87171', '#c084fc', '#fb923c', '#2dd4bf', '#a3e635', '#f472b6', '#60a5fa']
 
@@ -54,6 +58,12 @@ export default function HomeGraphs({ data }: { data: AllData }) {
   const month = thisMonth()
   const assets = useMemo(() => sortedAssets(data.assets), [data])
   const latest = assets[assets.length - 1]
+  const prev = assets[assets.length - 2]
+
+  // ---- 期間集計の状態 ----
+  const [preset, setPreset] = useState<Preset>('all')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
 
   // ---- 資産 ----
   const allocation = useMemo(() => {
@@ -117,6 +127,35 @@ export default function HomeGraphs({ data }: { data: AllData }) {
     return m
   }, [data])
 
+  // ---- 今月の収支・純資産・期間集計 ----
+  const curIncome = incMap.get(month) ?? 0
+  const curVariable = expMap.get(month) ?? 0
+  const curFixed = fixedOf(month)
+  const curBalance = curIncome - curVariable - curFixed
+  const liabilityTotal = totalLiabilitiesAt(liabilities, month)
+  const netWorthNow = (latest ? assetTotal(latest) : 0) - liabilityTotal
+
+  const earliestMonth = months.length ? months[0] : month
+  const [from, to] = useMemo((): [string, string] => {
+    if (preset === 'year') return [`${month.slice(0, 4)}-01`, month]
+    if (preset === '12m') return [addMonths(month, -11), month]
+    if (preset === 'custom' && customFrom && customTo) return [customFrom, customTo]
+    return [earliestMonth, month]
+  }, [preset, customFrom, customTo, earliestMonth, month])
+  const sum = useMemo(() => periodSummary(data, from, to, principalCap), [data, from, to, principalCap])
+  const cumulative = useMemo(() => {
+    let cin = 0
+    let cout = 0
+    return sum.months.map((m) => {
+      const other = estimateOtherExpense(incMap.get(m) ?? 0, fixedOf(m), expMap.get(m) ?? 0, breakdown.get(m)?.delta) ?? 0
+      cin += incMap.get(m) ?? 0
+      cout += fixedOf(m) + (expMap.get(m) ?? 0) + other
+      return { m, cin: Math.round(cin), cout: Math.round(cout) }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sum, incMap, expMap, breakdown])
+  const showLabels = cumulative.length <= 13
+
   const yenAxis = { y: { ticks: { callback: (v: unknown) => yenShort(Number(v)) } } }
   const lbl = (m: string) => m.slice(2)
 
@@ -125,6 +164,36 @@ export default function HomeGraphs({ data }: { data: AllData }) {
       {/* ===================== 資産 ===================== */}
       <details open className="graph-section">
         <summary>📈 資産のグラフ</summary>
+
+        <div className="card">
+          <h2>総資産{latest ? `（${latest.date}時点）` : ''}</h2>
+          {latest ? (
+            <>
+              <div className="big">{yen(assetTotal(latest))}</div>
+              {prev && (
+                <div className={assetTotal(latest) - assetTotal(prev) >= 0 ? 'pos' : 'neg'}>
+                  前回比 {assetTotal(latest) - assetTotal(prev) >= 0 ? '+' : ''}
+                  {yen(assetTotal(latest) - assetTotal(prev))}
+                </div>
+              )}
+              <div style={{ marginTop: 8 }}>
+                <div className="kv"><span className="muted">投資（マネフォ）</span><span>{yen(latest.investment)}</span></div>
+                <div className="kv"><span className="muted">現金（Zaim）</span><span>{yen(latest.cash)}</span></div>
+                <div className="kv"><span className="muted">年金</span><span>{yen(latest.pension)}</span></div>
+                {latest.mf_profit !== null && (
+                  <div className="kv"><span className="muted">評価損益（累計）</span>
+                    <span className={latest.mf_profit >= 0 ? 'pos' : 'neg'}>{yen(latest.mf_profit)}</span></div>
+                )}
+                {latest.monthly_gain !== null && (
+                  <div className="kv"><span className="muted">今月の投資増減</span>
+                    <span className={latest.monthly_gain >= 0 ? 'pos' : 'neg'}>{latest.monthly_gain >= 0 ? '+' : ''}{yen(latest.monthly_gain)}</span></div>
+                )}
+              </div>
+            </>
+          ) : (
+            <p className="muted">まだ記録がありません。「資産」タブから記録してください。</p>
+          )}
+        </div>
 
         {allocation.total > 0 && (
           <div className="card">
@@ -235,10 +304,110 @@ export default function HomeGraphs({ data }: { data: AllData }) {
       </details>
 
       {/* ===================== 収支 ===================== */}
-      {chartMonths.length >= 2 && (
-        <details className="graph-section">
-          <summary>💰 収支のグラフ</summary>
+      <details open className="graph-section">
+        <summary>💰 収支のグラフ</summary>
 
+        {(liabilities.length > 0 || liabilityTotal > 0) && (
+          <div className="card">
+            <h2>
+              純資産（バランスシート）
+              <HelpTip title="純資産の計算">
+                純資産 = 資産合計 − 負債合計。負債は「資産」タブで登録でき、ローンは元利均等の返済スケジュールから
+                各時点の残高を自動計算します（実測を入れた場合はそちらを優先）。推移グラフは「資産のグラフ」内にあります。
+              </HelpTip>
+            </h2>
+            <div className="kv"><span className="muted">資産合計</span><span>{yen(latest ? assetTotal(latest) : 0)}</span></div>
+            <div className="kv"><span className="muted">負債合計</span><span className="neg">−{yen(liabilityTotal)}</span></div>
+            <div className="kv" style={{ borderTop: '1px solid var(--border)', marginTop: 4, paddingTop: 8 }}>
+              <span>純資産</span>
+              <b className={netWorthNow >= 0 ? 'pos' : 'neg'}>{yen(netWorthNow)}</b>
+            </div>
+          </div>
+        )}
+
+        <div className="card">
+          <h2>今月の収支（{month}）</h2>
+          <div className="kv"><span className="muted">収入</span><span>{yen(curIncome)}</span></div>
+          <div className="kv"><span className="muted">変動費</span><span>{yen(curVariable)}</span></div>
+          <div className="kv"><span className="muted">固定費（月割り）</span><span>{yen(curFixed)}</span></div>
+          <div className="kv" style={{ borderTop: '1px solid var(--border)', marginTop: 4, paddingTop: 8 }}>
+            <span>収支</span>
+            <span className={curBalance >= 0 ? 'pos' : 'neg'}>{curBalance >= 0 ? '+' : ''}{yen(curBalance)}</span>
+          </div>
+        </div>
+
+        <div className="card">
+          <h2>
+            期間集計（{from} 〜 {to}・{sum.months.length}ヶ月）
+            <HelpTip title="期間集計の定義">
+              ・収入合計: 各月の実効収入（給与明細の手取り＋その他収入）
+              {'\n'}・固定費: 固定費タブの月割り額の合計
+              {'\n'}・変動費: 収支入力の合計
+              {'\n'}・その他支出: 収支タブと同じ推計（資産記録から算出できた月のみ合算）
+              {'\n'}・収支合計 = 収入 − (固定費+変動費+その他)
+              {'\n'}・期間の資産増減: 期間開始前月末と期間末の資産スナップショットの差（投資の値動き込み）
+            </HelpTip>
+          </h2>
+          <div className="seg">
+            {([['year', '今年'], ['12m', '過去12ヶ月'], ['all', '全期間'], ['custom', '期間指定']] as [Preset, string][]).map(([p, label]) => (
+              <button key={p} className={preset === p ? 'on' : ''} onClick={() => setPreset(p)}>{label}</button>
+            ))}
+          </div>
+          {preset === 'custom' && (
+            <div className="row2">
+              <label className="field">開始月
+                <input type="month" value={customFrom || earliestMonth} onChange={(e) => setCustomFrom(e.target.value)} /></label>
+              <label className="field">終了月
+                <input type="month" value={customTo || month} onChange={(e) => setCustomTo(e.target.value)} /></label>
+            </div>
+          )}
+          <div className="kv"><span className="muted">収入合計（手取り）</span><b className="pos">{yen(sum.income)}</b></div>
+          <div className="kv"><span className="muted">支出合計</span><b className="neg">{yen(sum.expense)}</b></div>
+          <div className="kv" style={{ paddingLeft: 12 }}><span className="muted">　固定費</span><span>{yen(sum.fixed)}</span></div>
+          <div className="kv" style={{ paddingLeft: 12 }}><span className="muted">　変動費</span><span>{yen(sum.variable)}</span></div>
+          <div className="kv" style={{ paddingLeft: 12 }}>
+            <span className="muted">　その他支出（{sum.otherMonths}/{sum.months.length}ヶ月分）</span>
+            <span>{yen(sum.other)}</span>
+          </div>
+          <div className="kv" style={{ borderTop: '1px solid var(--border)', marginTop: 4, paddingTop: 8 }}>
+            <span>収支合計</span>
+            <span className={sum.balance >= 0 ? 'pos' : 'neg'}>{sum.balance >= 0 ? '+' : ''}{yen(sum.balance)}</span>
+          </div>
+          {sum.assetDelta !== null && (
+            <div className="kv">
+              <span className="muted">期間の資産増減（値動き込み）</span>
+              <span className={sum.assetDelta >= 0 ? 'pos' : 'neg'}>{sum.assetDelta >= 0 ? '+' : ''}{yen(sum.assetDelta)}</span>
+            </div>
+          )}
+          {cumulative.length >= 2 && (
+            <div className="chart-box" style={{ marginTop: 10 }}>
+              <Line
+                data={{
+                  labels: cumulative.map((r) => lbl(r.m)),
+                  datasets: [
+                    { label: '累積収入', data: cumulative.map((r) => r.cin), borderColor: '#4ade80', backgroundColor: 'rgba(74,222,128,0.12)', fill: true, tension: 0.2 },
+                    { label: '累積支出', data: cumulative.map((r) => r.cout), borderColor: '#f87171', backgroundColor: 'rgba(248,113,113,0.10)', fill: true, tension: 0.2 },
+                    { label: '累積収支', data: cumulative.map((r) => r.cin - r.cout), borderColor: '#38bdf8', borderDash: [6, 4], tension: 0.2 },
+                  ],
+                }}
+                options={{
+                  maintainAspectRatio: false,
+                  interaction: { mode: 'index', intersect: false },
+                  scales: { y: { ticks: { callback: (v) => yenShort(Number(v)) } }, x: { ticks: { maxTicksLimit: 9, maxRotation: 0 } } },
+                  plugins: {
+                    datalabels: {
+                      display: (ctx) => showLabels || ctx.dataIndex === cumulative.length - 1 || ctx.dataIndex % Math.ceil(cumulative.length / 6) === 0,
+                      align: 'top', color: '#94a3b8', font: { size: 9 }, formatter: (v: number) => yenShort(v),
+                    },
+                  },
+                }}
+              />
+            </div>
+          )}
+        </div>
+
+        {chartMonths.length >= 2 && (
+          <>
           <div className="card">
             <h2>収入 vs 全支出（投資除く）</h2>
             <div className="chart-box">
@@ -313,12 +482,13 @@ export default function HomeGraphs({ data }: { data: AllData }) {
               />
             </div>
           </div>
-        </details>
-      )}
+          </>
+        )}
+      </details>
 
       {/* ===================== 消費量 ===================== */}
       {consumptionCats.length > 0 && chartMonths.length >= 2 && (
-        <details className="graph-section">
+        <details open className="graph-section">
           <summary>⚡ 消費量のグラフ</summary>
 
           <div className="card">

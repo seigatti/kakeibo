@@ -331,7 +331,7 @@ export function savingsRateByMonth(
   months: string[],
   principalCap: number = DEFAULT_PRINCIPAL_CAP,
 ): Array<{ month: string; rate: number }> {
-  const incMap = effectiveIncomeByMonth(data.income, data.furusato_salaries ?? [])
+  const incMap = effectiveIncomeByMonth(data.furusato_salaries ?? [])
   const expMap = expenseByMonth(data.expenses)
   const breakdown = nonInvestBreakdownByMonth(data.assets, principalCap)
   const out: Array<{ month: string; rate: number }> = []
@@ -356,7 +356,7 @@ export function expenseComposition(
   const fixed = months.reduce((s, m) => s + fixedMonthlyTotal(data.fixed_costs, m), 0)
   if (fixed > 0) items.push({ label: '固定費', value: Math.round(fixed) })
   for (const s of categoryStats(data.expenses, months)) items.push({ label: s.category, value: s.total })
-  const incMap = effectiveIncomeByMonth(data.income, data.furusato_salaries ?? [])
+  const incMap = effectiveIncomeByMonth(data.furusato_salaries ?? [])
   const expMap = expenseByMonth(data.expenses)
   const breakdown = nonInvestBreakdownByMonth(data.assets, principalCap)
   let other = 0
@@ -415,7 +415,7 @@ export function estimateLivingCost(
 ): LivingCostEstimate | null {
   const to = addMonths(thisMonth(), -1) // 当月は集計途中なので前月まで
   const from = addMonths(to, -(months - 1))
-  const incMap = effectiveIncomeByMonth(data.income, data.furusato_salaries ?? [])
+  const incMap = effectiveIncomeByMonth(data.furusato_salaries ?? [])
   const expMap = expenseByMonth(data.expenses)
   const breakdown = nonInvestBreakdownByMonth(data.assets, principalCap)
 
@@ -449,7 +449,7 @@ export function periodSummary(
   principalCap: number = DEFAULT_PRINCIPAL_CAP,
 ): PeriodSummary {
   const months = from <= to ? monthRange(from, to) : []
-  const incMap = effectiveIncomeByMonth(data.income, data.furusato_salaries ?? [])
+  const incMap = effectiveIncomeByMonth(data.furusato_salaries ?? [])
   const expMap = expenseByMonth(data.expenses)
   const breakdown = nonInvestBreakdownByMonth(data.assets, principalCap)
 
@@ -501,18 +501,27 @@ export function netSalaryByMonth(salaries: FurusatoSalary[]): Map<string, number
   return map
 }
 
-/**
- * 月ごとの実効収入。給料は手入力（income.salary）を優先し、
- * 未入力の月は ふるさとの給与データの手取りを自動採用する。その他収入は常に加算。
- */
-export function effectiveIncomeByMonth(income: IncomeRow[], salaries: FurusatoSalary[]): Map<string, number> {
-  const net = netSalaryByMonth(salaries)
+/** ふるさとの月次給与から月ごとの世帯その他収入（全員分合算） */
+export function otherIncomeByMonth(salaries: FurusatoSalary[]): Map<string, number> {
   const map = new Map<string, number>()
-  const months = new Set([...income.map((i) => i.month), ...net.keys()])
-  for (const m of months) {
-    const row = income.find((i) => i.month === m)
-    const salary = row?.salary ?? net.get(m) ?? 0
-    map.set(m, salary + (row?.other ?? 0))
+  for (const s of salaries) {
+    if (!s.other_income || s.other_income <= 0) continue
+    const key = `${s.year}-${String(s.month).padStart(2, '0')}`
+    map.set(key, (map.get(key) ?? 0) + s.other_income)
+  }
+  return map
+}
+
+/**
+ * 月ごとの実効収入 = 給与明細の手取り（総支給−控除・全員分）＋ その他収入（明細・全員分）。
+ * 収入は給与明細（furusato_salaries）ベースに一本化している。
+ */
+export function effectiveIncomeByMonth(salaries: FurusatoSalary[]): Map<string, number> {
+  const net = netSalaryByMonth(salaries)
+  const other = otherIncomeByMonth(salaries)
+  const map = new Map<string, number>()
+  for (const m of new Set([...net.keys(), ...other.keys()])) {
+    map.set(m, (net.get(m) ?? 0) + (other.get(m) ?? 0))
   }
   return map
 }

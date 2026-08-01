@@ -4,7 +4,8 @@ import { appBaseUrl, mfBookmarklet, rakutenBookmarklet, zaimBookmarklet } from '
 import ConstantsEditor from '../components/ConstantsEditor'
 import PersonEditor from '../components/PersonEditor'
 import { useStore } from '../store'
-import type { AllData } from '../types'
+import { DEFAULT_CATEGORIES, type AllData } from '../types'
+import CsvImportCard from '../pages/CsvImportCard'
 
 function downloadCsv(name: string, rows: Record<string, unknown>[]) {
   if (rows.length === 0) return
@@ -48,9 +49,17 @@ export default function Settings() {
 
   const base = appBaseUrl()
 
+  const categories = (() => {
+    const fromSettings = data?.settings.find((s) => s.key === 'expense_categories')?.value
+    const bs = fromSettings ? fromSettings.split(',') : DEFAULT_CATEGORIES
+    const inData = [...new Set((data?.expenses ?? []).map((e) => e.category))]
+    return [...new Set([...bs, ...inData])]
+  })()
+
   return (
     <>
       {config && <PersonEditor />}
+      {config && <CsvImportCard categories={categories} />}
       {config && <ConstantsEditor />}
 
       <div className="card">

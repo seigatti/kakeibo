@@ -30,11 +30,10 @@ export default function Dashboard() {
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
 
-  // データが存在する最古の月（収入・変動費・給与データから）
+  // データが存在する最古の月（変動費・給与データから）
   const earliestMonth = useMemo(() => {
     if (!data) return month
     const months = [
-      ...data.income.map((i) => i.month),
       ...data.expenses.map((e) => e.month),
       ...netSalaryByMonth(data.furusato_salaries ?? []).keys(),
     ]
@@ -59,7 +58,7 @@ export default function Dashboard() {
   // 累積グラフ用の系列
   const cumulative = useMemo(() => {
     if (!data || !sum) return null
-    const incMap = effectiveIncomeByMonth(data.income, data.furusato_salaries ?? [])
+    const incMap = effectiveIncomeByMonth(data.furusato_salaries ?? [])
     const expMap = expenseByMonth(data.expenses)
     const breakdown = nonInvestBreakdownByMonth(data.assets, principalCap)
     let cin = 0
@@ -80,7 +79,7 @@ export default function Dashboard() {
   const latest = assets[assets.length - 1]
   const prev = assets[assets.length - 2]
 
-  const income = effectiveIncomeByMonth(data.income, data.furusato_salaries ?? []).get(month) ?? 0
+  const income = effectiveIncomeByMonth(data.furusato_salaries ?? []).get(month) ?? 0
   const variable = expenseByMonth(data.expenses).get(month) ?? 0
   const fixed = fixedMonthlyTotal(data.fixed_costs, month)
   const balance = income - variable - fixed

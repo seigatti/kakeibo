@@ -11,6 +11,9 @@ import {
 import { useStore } from '../store'
 import { yen } from '../utils'
 
+// 収入（給料・その他収入）は給与明細タブで管理するため、CSVインポートは変動費のみ取り込む
+const asExpenseTarget = (t: string) => (t === TARGET_SALARY || t === TARGET_OTHER_INCOME ? TARGET_IGNORE : t)
+
 export default function CsvImportCard({ categories }: { categories: string[] }) {
   const { data, mutate, saving } = useStore()
   const fileRef = useRef<HTMLInputElement>(null)
@@ -28,7 +31,7 @@ export default function CsvImportCard({ categories }: { categories: string[] }) 
     }
   }, [data])
 
-  const targets = [...categories, TARGET_SALARY, TARGET_OTHER_INCOME, TARGET_IGNORE]
+  const targets = [...categories, TARGET_IGNORE]
 
   const onFile = async (file: File) => {
     setMsg('')
@@ -36,7 +39,10 @@ export default function CsvImportCard({ categories }: { categories: string[] }) 
     try {
       const p = parseZaimCsv(await file.arrayBuffer())
       setParsed(p)
-      setMapping(defaultMapping(p, categories, savedMapping))
+      // 給料・その他収入の推定は「無視」に落として変動費のみ対応付ける
+      const def = defaultMapping(p, categories, savedMapping)
+      for (const k of Object.keys(def)) def[k] = asExpenseTarget(def[k])
+      setMapping(def)
     } catch (e) {
       setParsed(null)
       setErr(e instanceof Error ? e.message : String(e))
@@ -48,11 +54,8 @@ export default function CsvImportCard({ categories }: { categories: string[] }) 
   const register = async () => {
     setMsg('')
     setErr('')
+    // 変動費のみ登録（収入は給与明細タブで管理）
     const months = aggs.map((a) => ({
-      income:
-        a.salary !== null || a.other !== null
-          ? { month: a.month, salary: a.salary, other: a.other, memo: 'CSV取込' }
-          : null,
       expenses: Object.entries(a.expenses).map(([category, amount]) => ({
         month: a.month,
         category,
@@ -75,7 +78,7 @@ export default function CsvImportCard({ categories }: { categories: string[] }) 
       <h2>Zaim CSVインポート（収支の一括登録）</h2>
       <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
         Zaim Web版の「記録の出力（CSV）」でダウンロードしたファイルを選ぶと、
-        月ごとの給料・変動費を自動集計して登録します。同じ月・同じカテゴリは上書きされます。
+        月ごとの変動費を自動集計して登録します（収入は給与明細タブで管理）。同じ月・同じカテゴリは上書きされます。
       </p>
       <input
         ref={fileRef}
@@ -114,8 +117,6 @@ export default function CsvImportCard({ categories }: { categories: string[] }) 
                 <thead>
                   <tr>
                     <th style={{ textAlign: 'left', padding: 4 }}>月</th>
-                    <th style={{ textAlign: 'right', padding: 4 }}>給料</th>
-                    <th style={{ textAlign: 'right', padding: 4 }}>その他収入</th>
                     {categories.filter((c) => aggs.some((a) => a.expenses[c] !== undefined)).map((c) => (
                       <th key={c} style={{ textAlign: 'right', padding: 4 }}>{c}</th>
                     ))}
@@ -125,8 +126,6 @@ export default function CsvImportCard({ categories }: { categories: string[] }) 
                   {aggs.map((a) => (
                     <tr key={a.month} style={{ borderTop: '1px solid var(--border)' }}>
                       <td style={{ padding: 4 }}>{a.month}</td>
-                      <td style={{ textAlign: 'right', padding: 4 }}>{a.salary !== null ? yen(a.salary) : '−'}</td>
-                      <td style={{ textAlign: 'right', padding: 4 }}>{a.other !== null ? yen(a.other) : '−'}</td>
                       {categories.filter((c) => aggs.some((x) => x.expenses[c] !== undefined)).map((c) => (
                         <td key={c} style={{ textAlign: 'right', padding: 4 }}>
                           {a.expenses[c] !== undefined ? yen(a.expenses[c]) : '−'}

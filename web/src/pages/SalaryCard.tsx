@@ -8,7 +8,7 @@ interface Props {
   persons: string[] // 管理者リスト（カード内で切替）
 }
 
-const EMPTY_MONTH = { gross: '', health: '', pension_ins: '', employment: '', care_ins: '', income_tax: '', resident_tax: '' }
+const EMPTY_MONTH = { gross: '', health: '', pension_ins: '', employment: '', care_ins: '', income_tax: '', resident_tax: '', other_income: '' }
 type BonusRow = { month: string; months: string; amount: string }
 
 const num = (s: string) => (s.trim() === '' ? null : Number(s.replace(/[,，]/g, '')))
@@ -88,6 +88,7 @@ export default function SalaryCard({ persons }: Props) {
       care_ins: hit?.care_ins?.toString() ?? '',
       income_tax: hit?.income_tax?.toString() ?? '',
       resident_tax: hit?.resident_tax?.toString() ?? '',
+      other_income: hit?.other_income?.toString() ?? '',
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [month, person, year, data])
@@ -125,6 +126,7 @@ export default function SalaryCard({ persons }: Props) {
         care_ins: num(form.care_ins),
         income_tax: num(form.income_tax),
         resident_tax: num(form.resident_tax),
+        other_income: num(form.other_income),
       },
     })
     setMsg(`${month}月分を保存しました ✓`)
@@ -148,6 +150,7 @@ export default function SalaryCard({ persons }: Props) {
       care_ins: num(form.care_ins),
       income_tax: num(form.income_tax),
       resident_tax: num(form.resident_tax),
+      other_income: num(form.other_income),
     }
     await mutate('setFurusatoSalaries', {
       rows: copyTargets.map((m) => ({ person, year, month: m, ...values })),
@@ -306,6 +309,11 @@ export default function SalaryCard({ persons }: Props) {
         </span>
         <b>{formDeduction !== null ? yen(formDeduction) : '−'}</b>
       </div>
+      <label className="field" style={{ marginTop: 6 }}>
+        その他収入（給与以外）
+        <HelpTip title="その他収入">給与以外の収入（副業・臨時収入など）を月単位で入力します。手取り（総支給−控除）にそのまま加算され、収支タブの「収入」になります。人ごと・月ごとに管理されます。</HelpTip>
+        <input type="text" inputMode="numeric" placeholder="任意" value={form.other_income} onChange={(e) => setForm({ ...form, other_income: e.target.value })} />
+      </label>
       <button className="btn" onClick={() => void saveMonth()} disabled={saving}>{saving ? '保存中…' : `${month}月分を保存`}</button>
       {salaries.some((s) => Number(s.month) === month) && (
         <button className="btn danger" style={{ marginTop: 8 }} onClick={() => void clearMonth()}>この月の記録を削除</button>

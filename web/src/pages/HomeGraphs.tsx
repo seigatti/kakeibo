@@ -16,6 +16,7 @@ import {
   netSalaryByMonth,
   netWorthByMonth,
   nonInvestBreakdownByMonth,
+  otherIncomeByMonth,
   savingsRateByMonth,
   sortedAssets,
   thisMonth,
@@ -76,9 +77,10 @@ export default function HomeGraphs({ data }: { data: AllData }) {
 
   // ---- 収支 ----
   const netByMonth = useMemo(() => netSalaryByMonth(data.furusato_salaries ?? []), [data])
-  const months = useMemo(() => dataMonthRange(data.expenses, data.income, [...netByMonth.keys()]), [data, netByMonth])
+  const otherByMonth = useMemo(() => otherIncomeByMonth(data.furusato_salaries ?? []), [data])
+  const months = useMemo(() => dataMonthRange(data.expenses, [], [...netByMonth.keys(), ...otherByMonth.keys()]), [data, netByMonth, otherByMonth])
   const chartMonths = months.slice(-24)
-  const incMap = useMemo(() => effectiveIncomeByMonth(data.income, data.furusato_salaries ?? []), [data])
+  const incMap = useMemo(() => effectiveIncomeByMonth(data.furusato_salaries ?? []), [data])
   const expMap = useMemo(() => expenseByMonth(data.expenses), [data])
   const breakdown = useMemo(() => nonInvestBreakdownByMonth(data.assets, principalCap), [data, principalCap])
   const fixedOf = (m: string) => fixedMonthlyTotal(data.fixed_costs, m)

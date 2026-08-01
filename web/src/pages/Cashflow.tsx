@@ -4,8 +4,7 @@ import { useStore } from '../store'
 import { CONSUMPTION_UNITS, DEFAULT_CATEGORIES } from '../types'
 import HelpTip from '../components/HelpTip'
 import { DEFAULT_PERSONS } from '../types'
-import { addMonths, amt, categoryStats, dataMonthRange, DEFAULT_PRINCIPAL_CAP, effectiveIncomeByMonth, estimateOtherExpense, expenseByMonth, fixedMonthlyTotal, monthRange, netSalaryByMonth, nonInvestBreakdownByMonth, thisMonth, yen, yenShort } from '../utils'
-import CsvImportCard from './CsvImportCard'
+import { addMonths, categoryStats, dataMonthRange, DEFAULT_PRINCIPAL_CAP, effectiveIncomeByMonth, estimateOtherExpense, expenseByMonth, fixedMonthlyTotal, monthRange, netSalaryByMonth, nonInvestBreakdownByMonth, otherIncomeByMonth, thisMonth, yen, yenShort } from '../utils'
 import SalaryCard from './SalaryCard'
 
 const PALETTE = ['#38bdf8', '#4ade80', '#fbbf24', '#f87171', '#c084fc', '#fb923c', '#2dd4bf', '#a3e635']
@@ -13,8 +12,6 @@ const PALETTE = ['#38bdf8', '#4ade80', '#fbbf24', '#f87171', '#c084fc', '#fb923c
 export default function Cashflow() {
   const { data, mutate, saving } = useStore()
   const [month, setMonth] = useState(thisMonth())
-  const [salary, setSalary] = useState('')
-  const [other, setOther] = useState('')
   const [amounts, setAmounts] = useState<Record<string, string>>({})
   const [quantities, setQuantities] = useState<Record<string, string>>({})
   const [newCat, setNewCat] = useState('')
@@ -40,9 +37,6 @@ export default function Cashflow() {
   // 月を切り替えたら既存データをフォームへ反映
   useEffect(() => {
     if (!data) return
-    const inc = data.income.find((i) => i.month === month)
-    setSalary(inc?.salary?.toString() ?? '')
-    setOther(inc?.other?.toString() ?? '')
     const map: Record<string, string> = {}
     for (const e of data.expenses.filter((e) => e.month === month)) map[e.category] = String(e.amount)
     setAmounts(map)
@@ -53,15 +47,11 @@ export default function Cashflow() {
 
   const num = (s: string | undefined) => (!s || s.trim() === '' ? null : Number(s.replace(/[,，]/g, '')))
 
-  // 前月コピー: 対象月が未入力のとき、前月の給料・変動費をフォームへ充填
+  // 前月コピー: 対象月が変動費未入力のとき、前月の変動費をフォームへ充填
   const prevMonth = addMonths(month, -1)
-  const prevIncome = data?.income.find((i) => i.month === prevMonth)
   const prevExpenses = useMemo(() => data?.expenses.filter((e) => e.month === prevMonth) ?? [], [data, prevMonth])
-  const monthIsEmpty =
-    !data?.income.some((i) => i.month === month) && !data?.expenses.some((e) => e.month === month)
+  const monthIsEmpty = !data?.expenses.some((e) => e.month === month)
   const copyPrevMonth = () => {
-    setSalary(prevIncome?.salary?.toString() ?? '')
-    setOther(prevIncome?.other?.toString() ?? '')
     const map: Record<string, string> = {}
     for (const e of prevExpenses) map[e.category] = String(e.amount)
     setAmounts(map)
@@ -71,23 +61,23 @@ export default function Cashflow() {
   const save = async () => {
     setMsg('')
     await mutate('setMonthData', {
-      income: { month, salary: num(salary), other: num(other), memo: null },
       expenses: categories.map((c) => ({ month, category: c, amount: num(amounts[c]) })),
       consumption: Object.keys(CONSUMPTION_UNITS).map((c) => ({ month, category: c, quantity: num(quantities[c]) })),
     })
-    setMsg(`${month} の収支を保存しました`)
+    setMsg(`${month} の変動費を保存しました`)
   }
 
   // ---- グラフ用集計 ----
-  // 給料が未入力の月は、ふるさとの給与データの手取り（総支給−控除合計）を収入として扱う
+  // 収入は給与明細（手取り）＋その他収入。月範囲にはそれらの月も含める
   const netByMonth = useMemo(() => netSalaryByMonth(data?.furusato_salaries ?? []), [data])
+  const otherByMonth = useMemo(() => otherIncomeByMonth(data?.furusato_salaries ?? []), [data])
   const months = useMemo(
-    () => (data ? dataMonthRange(data.expenses, data.income, [...netByMonth.keys()]) : []),
-    [data, netByMonth],
+    () => (data ? dataMonthRange(data.expenses, [], [...netByMonth.keys(), ...otherByMonth.keys()]) : []),
+    [data, netByMonth, otherByMonth],
   )
   const chartMonths = months.slice(-24)
   const expMap = useMemo(() => expenseByMonth(data?.expenses ?? []), [data])
-  const incMap = useMemo(() => effectiveIncomeByMonth(data?.income ?? [], data?.furusato_salaries ?? []), [data])
+  const incMap = useMemo(() => effectiveIncomeByMonth(data?.furusato_salaries ?? []), [data])
   const fixedOf = (m: string) => fixedMonthlyTotal(data?.fixed_costs ?? [], m)
 
   const catTrend = useMemo(() => {
@@ -147,34 +137,19 @@ export default function Cashflow() {
   return (
     <>
       <div className="card">
-        <h2>収支入力（過去月もOK）</h2>
+        <h2>
+          変動費入力（過去月もOK）
+          <HelpTip title="収入・その他収入について">
+            月の収入は下の「月次給与から年収を想定」で入力する給与の手取り（総支給−控除）＋その他収入で自動計算されます。
+            電気・水道・ガス・ガソリンは金額の下に消費量（kWh・m³・L）も入力でき、単価（円/kWh等）の推移を確認できます。
+          </HelpTip>
+        </h2>
         <label className="field">対象月<input type="month" value={month} onChange={(e) => { setMonth(e.target.value); setMsg('') }} /></label>
-        {monthIsEmpty && (prevIncome || prevExpenses.length > 0) && (
+        {monthIsEmpty && prevExpenses.length > 0 && (
           <button className="btn secondary" style={{ marginBottom: 10 }} onClick={copyPrevMonth}>
-            前月（{prevMonth}）の値をコピー
+            前月（{prevMonth}）の変動費をコピー
           </button>
         )}
-        <div className="row2">
-          <label className="field">
-            給料（空欄=給与データの手取り）
-            <HelpTip title="給料の自動採用">
-              給料が未入力の月は、下の「月次給与」カードで入力した給与の手取り（総支給−控除合計）を全員分合算して収入として使います。手入力があればそちらが優先されます。控除が未入力の月は総支給がそのまま使われます。
-            </HelpTip>
-            <input type="text" inputMode="numeric" value={salary} onChange={(e) => setSalary(e.target.value)}
-              placeholder={
-                netByMonth.get(month) !== undefined
-                  ? `手取り: ${amt(netByMonth.get(month)!)}`
-                  : prevIncome?.salary
-                    ? `前月: ${amt(prevIncome.salary)}`
-                    : undefined
-              } /></label>
-          <label className="field">その他収入
-            <input type="text" inputMode="numeric" value={other} onChange={(e) => setOther(e.target.value)} /></label>
-        </div>
-        <h2 style={{ marginTop: 6 }}>
-          変動費
-          <HelpTip title="消費量">電気・水道・ガス・ガソリンは金額の下に消費量（kWh・m³・L）も入力できます。金額÷消費量で単価（円/kWh等）を計算し、下のグラフで推移を確認できます。</HelpTip>
-        </h2>
         <div className="row2">
           {categories.map((c) => (
             <label className="field" key={c}>{c}
@@ -197,11 +172,9 @@ export default function Cashflow() {
         <button className="btn" onClick={() => void save()} disabled={saving}>{saving ? '保存中…' : '保存'}</button>
         {msg && <p className="pos center" style={{ margin: '8px 0 0' }}>{msg}</p>}
         <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
-          ※支出合計には固定費の月割り（{yen(fixedOf(month))}）が自動で加算されます
+          ※支出合計には固定費の月割り（{yen(fixedOf(month))}）が自動で加算されます。給料・その他収入は下の給与カードで入力します
         </p>
       </div>
-
-      <CsvImportCard categories={categories} />
 
       <SalaryCard persons={persons} />
 

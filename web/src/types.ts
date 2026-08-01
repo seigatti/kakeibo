@@ -98,6 +98,7 @@ export interface FurusatoSalary {
   care_ins: number | null // 介護保険（40歳以降）
   income_tax: number | null // 所得税
   resident_tax: number | null // 住民税
+  other_income: number | null // その他収入（給与以外。手取りにそのまま加算）
 }
 
 export const APPLICATION_STATUSES = ['未購入', '購入済み、書類未', 'ワンストップ未', '手続き済、税額確認未', '完了'] as const

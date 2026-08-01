@@ -325,6 +325,57 @@ export function categoryStats(expenses: ExpenseRow[], months: string[]): Categor
   return out.sort((a, b) => b.total - a.total)
 }
 
+/** 月ごとの貯蓄率(%) = (収入 − 支出) ÷ 収入 × 100。支出=固定+変動+その他支出。収入0の月は除外 */
+export function savingsRateByMonth(
+  data: Pick<AllData, 'income' | 'expenses' | 'fixed_costs' | 'assets'> & { furusato_salaries?: AllData['furusato_salaries'] },
+  months: string[],
+  principalCap: number = DEFAULT_PRINCIPAL_CAP,
+): Array<{ month: string; rate: number }> {
+  const incMap = effectiveIncomeByMonth(data.income, data.furusato_salaries ?? [])
+  const expMap = expenseByMonth(data.expenses)
+  const breakdown = nonInvestBreakdownByMonth(data.assets, principalCap)
+  const out: Array<{ month: string; rate: number }> = []
+  for (const m of months) {
+    const income = incMap.get(m) ?? 0
+    if (income <= 0) continue
+    const fixed = fixedMonthlyTotal(data.fixed_costs, m)
+    const variable = expMap.get(m) ?? 0
+    const other = estimateOtherExpense(income, fixed, variable, breakdown.get(m)?.delta) ?? 0
+    out.push({ month: m, rate: Math.round(((income - (fixed + variable + other)) / income) * 1000) / 10 })
+  }
+  return out
+}
+
+/** 期間の支出内訳（固定費計 + 変動費カテゴリ別 + その他支出計）。ドーナツ用・降順 */
+export function expenseComposition(
+  data: Pick<AllData, 'income' | 'expenses' | 'fixed_costs' | 'assets'> & { furusato_salaries?: AllData['furusato_salaries'] },
+  months: string[],
+  principalCap: number = DEFAULT_PRINCIPAL_CAP,
+): Array<{ label: string; value: number }> {
+  const items: Array<{ label: string; value: number }> = []
+  const fixed = months.reduce((s, m) => s + fixedMonthlyTotal(data.fixed_costs, m), 0)
+  if (fixed > 0) items.push({ label: '固定費', value: Math.round(fixed) })
+  for (const s of categoryStats(data.expenses, months)) items.push({ label: s.category, value: s.total })
+  const incMap = effectiveIncomeByMonth(data.income, data.furusato_salaries ?? [])
+  const expMap = expenseByMonth(data.expenses)
+  const breakdown = nonInvestBreakdownByMonth(data.assets, principalCap)
+  let other = 0
+  for (const m of months) {
+    const o = estimateOtherExpense(incMap.get(m) ?? 0, fixedMonthlyTotal(data.fixed_costs, m), expMap.get(m) ?? 0, breakdown.get(m)?.delta)
+    if (o !== null) other += o
+  }
+  if (other > 0) items.push({ label: 'その他支出', value: Math.round(other) })
+  return items.filter((i) => i.value > 0).sort((a, b) => b.value - a.value)
+}
+
+/** 固定費の月割り内訳（指定月で有効なもの）。ドーナツ/一覧用・降順 */
+export function fixedCostBreakdown(fixedCosts: FixedCostRow[], month: string): Array<{ name: string; monthly: number }> {
+  return fixedCosts
+    .map((fc) => ({ name: fc.name, monthly: Math.round(monthlyShare(fc, month)) }))
+    .filter((x) => x.monthly > 0)
+    .sort((a, b) => b.monthly - a.monthly)
+}
+
 export interface AllocationPoint {
   month: string
   investPct: number

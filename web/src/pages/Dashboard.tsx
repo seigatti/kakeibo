@@ -1,10 +1,9 @@
 import { useMemo, useState } from 'react'
-import { Doughnut, Line } from 'react-chartjs-2'
+import { Line } from 'react-chartjs-2'
 import HelpTip from '../components/HelpTip'
 import { useStore } from '../store'
 import {
   addMonths,
-  assetAllocationTrend,
   assetTotal,
   DEFAULT_PRINCIPAL_CAP,
   effectiveIncomeByMonth,
@@ -12,7 +11,6 @@ import {
   expenseByMonth,
   fixedMonthlyTotal,
   netSalaryByMonth,
-  netWorthByMonth,
   nonInvestBreakdownByMonth,
   periodSummary,
   sortedAssets,
@@ -21,6 +19,7 @@ import {
   yen,
   yenShort,
 } from '../utils'
+import HomeGraphs from './HomeGraphs'
 
 type Preset = 'year' | '12m' | 'all' | 'custom'
 
@@ -86,25 +85,12 @@ export default function Dashboard() {
   const fixed = fixedMonthlyTotal(data.fixed_costs, month)
   const balance = income - variable - fixed
 
-  const recent = assets.slice(-13)
   const showLabels = (cumulative?.length ?? 0) <= 13 // 1年以内の表示なら各点に値ラベル
 
-  // 資産配分（最新スナップショットの内訳）
-  const allocation = (() => {
-    const items = [
-      { label: '投資', value: latest?.investment ?? 0, color: '#4ade80' },
-      { label: '現金', value: latest?.cash ?? 0, color: '#38bdf8' },
-      { label: '年金', value: latest?.pension ?? 0, color: '#c084fc' },
-    ].filter((a) => a.value > 0)
-    return { items, total: items.reduce((s, a) => s + a.value, 0) }
-  })()
-  const allocTrend = assetAllocationTrend(data.assets).slice(-24)
-
-  // 負債・純資産
+  // 負債・純資産（推移グラフは HomeGraphs 側）
   const liabilities = data.liabilities ?? []
   const liabilityTotal = totalLiabilitiesAt(liabilities, month)
   const netWorthNow = (latest ? assetTotal(latest) : 0) - liabilityTotal
-  const netWorthSeries = netWorthByMonth(data.assets, liabilities).slice(-24)
 
   return (
     <>
@@ -138,93 +124,13 @@ export default function Dashboard() {
         )}
       </div>
 
-      {latest && allocation.total > 0 && (
-        <div className="card">
-          <h2>
-            資産配分
-            <HelpTip title="資産配分">
-              最新の資産記録（{latest.date}）の内訳です。投資・現金・年金の構成比を表示します。
-              現金の比率が高すぎないか、投資に偏りすぎていないかの確認に使えます。
-            </HelpTip>
-          </h2>
-          <div className="chart-box small">
-            <Doughnut
-              data={{
-                labels: allocation.items.map((a) => a.label),
-                datasets: [{
-                  data: allocation.items.map((a) => a.value),
-                  backgroundColor: allocation.items.map((a) => a.color),
-                  borderColor: 'transparent',
-                }],
-              }}
-              options={{
-                maintainAspectRatio: false,
-                cutout: '58%',
-                plugins: {
-                  legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } },
-                  datalabels: {
-                    display: true,
-                    color: '#0f172a',
-                    font: { size: 11, weight: 'bold' },
-                    formatter: (v: number) => `${Math.round((v / allocation.total) * 100)}%`,
-                  },
-                },
-              }}
-            />
-          </div>
-          <div style={{ marginTop: 6 }}>
-            {allocation.items.map((a) => (
-              <div className="kv" key={a.label}>
-                <span className="muted">
-                  <span style={{ color: a.color }}>■</span> {a.label}（{Math.round((a.value / allocation.total) * 100)}%）
-                </span>
-                <span>{yen(a.value)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {allocTrend.length >= 2 && (
-        <div className="card">
-          <h2>
-            資産配分の推移
-            <HelpTip title="資産配分の推移">
-              各資産記録時点での投資・現金・年金の構成比（%）の推移です。合計が100%になります。
-              現金比率が下がって投資比率が上がっている、などの傾向がわかります。
-            </HelpTip>
-          </h2>
-          <div className="chart-box small">
-            <Line
-              data={{
-                labels: allocTrend.map((p) => p.month.slice(2)),
-                datasets: [
-                  { label: '投資', data: allocTrend.map((p) => p.investPct), borderColor: '#4ade80', tension: 0.3, pointRadius: 0 },
-                  { label: '現金', data: allocTrend.map((p) => p.cashPct), borderColor: '#38bdf8', tension: 0.3, pointRadius: 0 },
-                  { label: '年金', data: allocTrend.map((p) => p.pensionPct), borderColor: '#c084fc', tension: 0.3, pointRadius: 0 },
-                ],
-              }}
-              options={{
-                maintainAspectRatio: false,
-                interaction: { mode: 'index', intersect: false },
-                scales: { y: { min: 0, max: 100, ticks: { callback: (v) => `${v}%` } }, x: { ticks: { maxTicksLimit: 8, maxRotation: 0 } } },
-                plugins: {
-                  datalabels: { display: false },
-                  tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y}%` } },
-                },
-              }}
-            />
-          </div>
-        </div>
-      )}
-
       {(liabilities.length > 0 || liabilityTotal > 0) && (
         <div className="card">
           <h2>
             純資産（バランスシート）
             <HelpTip title="純資産の計算">
               純資産 = 資産合計 − 負債合計。負債は「資産」タブで登録でき、ローンは元利均等の返済スケジュールから
-              各時点の残高を自動計算します（実測を入れた場合はそちらを優先）。グラフは資産記録がある月ごとの推移です。
+              各時点の残高を自動計算します（実測を入れた場合はそちらを優先）。推移グラフは下の「資産のグラフ」内にあります。
             </HelpTip>
           </h2>
           <div className="kv"><span className="muted">資産合計</span><span>{yen(latest ? assetTotal(latest) : 0)}</span></div>
@@ -233,25 +139,6 @@ export default function Dashboard() {
             <span>純資産</span>
             <b className={netWorthNow >= 0 ? 'pos' : 'neg'}>{yen(netWorthNow)}</b>
           </div>
-          {netWorthSeries.length >= 2 && (
-            <div className="chart-box small" style={{ marginTop: 8 }}>
-              <Line
-                data={{
-                  labels: netWorthSeries.map((p) => p.month.slice(2)),
-                  datasets: [
-                    { label: '資産', data: netWorthSeries.map((p) => p.assets), borderColor: '#38bdf8', tension: 0.3, pointRadius: 0 },
-                    { label: '負債', data: netWorthSeries.map((p) => -p.liabilities), borderColor: '#f87171', tension: 0.3, pointRadius: 0 },
-                    { label: '純資産', data: netWorthSeries.map((p) => p.netWorth), borderColor: '#4ade80', backgroundColor: 'rgba(74,222,128,0.12)', fill: true, tension: 0.3, pointRadius: 0 },
-                  ],
-                }}
-                options={{
-                  maintainAspectRatio: false,
-                  interaction: { mode: 'index', intersect: false },
-                  scales: { y: { ticks: { callback: (v) => yenShort(Number(v)) } }, x: { ticks: { maxTicksLimit: 8, maxRotation: 0 } } },
-                }}
-              />
-            </div>
-          )}
         </div>
       )}
 
@@ -344,33 +231,7 @@ export default function Dashboard() {
         </p>
       </div>
 
-      {recent.length >= 2 && (
-        <div className="card">
-          <h2>資産推移（直近）</h2>
-          <div className="chart-box small">
-            <Line
-              data={{
-                labels: recent.map((a) => a.date.slice(2, 7)),
-                datasets: [
-                  {
-                    label: '合計',
-                    data: recent.map(assetTotal),
-                    borderColor: '#38bdf8',
-                    backgroundColor: 'rgba(56, 189, 248, 0.15)',
-                    fill: true,
-                    tension: 0.3,
-                  },
-                ],
-              }}
-              options={{
-                maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
-                scales: { y: { ticks: { callback: (v) => yenShort(Number(v)) } } },
-              }}
-            />
-          </div>
-        </div>
-      )}
+      <HomeGraphs data={data} />
     </>
   )
 }

@@ -358,6 +358,34 @@ button {
   color: var(--accent);
 }
 
+/* ホームのグラフ折りたたみセクション */
+.graph-section > summary {
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 700;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  list-style: none;
+}
+
+.graph-section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.graph-section > summary::after {
+  content: ' ▼';
+  float: right;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.graph-section[open] > summary::after {
+  content: ' ▲';
+}
+
 /* ---- ヘルプ「？」 ---- */
 .helptip {
   position: relative;

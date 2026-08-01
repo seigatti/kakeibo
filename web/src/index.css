@@ -380,11 +380,9 @@ button {
 }
 
 .helptip-pop {
-  position: absolute;
+  position: fixed; /* 祖先の overflow に影響されず画面内に表示（top/left/width/max-height は JS で指定） */
   z-index: 60;
-  left: 0;
-  top: 20px;
-  width: min(300px, 78vw);
+  overflow-y: auto;
   background: var(--bg3);
   border: 1px solid var(--accent);
   border-radius: 8px;
@@ -396,11 +394,6 @@ button {
   white-space: normal;
   text-align: left;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
-}
-
-.helptip-pop.right {
-  left: auto;
-  right: 0;
 }
 
 .helptip-pop table {

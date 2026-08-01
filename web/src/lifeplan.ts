@@ -7,7 +7,7 @@
  */
 import { getConst } from './constants.ts'
 import type { BonusConfig, FurusatoSalary } from './types.ts'
-import { annualLoanPayment, deductionTotal, estimateSalary, loanBalance, type SalaryEstimate } from './utils.ts'
+import { annualLoanPayment, estimateSalary, loanBalance, type SalaryEstimate } from './utils.ts'
 
 export interface LifeplanAdult {
   name: string
@@ -164,11 +164,7 @@ export function estimateIncome(
 ): { net: number; gross: number } | null {
   const est: SalaryEstimate | null = estimateSalary(entries, bonusBase, bonusConfig)
   if (!est) return null
-  const withGross = entries.filter((e) => e.gross !== null && e.gross > 0)
-  const nets = withGross.map((e) => (e.gross ?? 0) - (deductionTotal(e) ?? 0))
-  const netAvg = nets.reduce((s, v) => s + v, 0) / nets.length
-  const annualNet = netAvg * 12 + est.bonusTotal * (est.avgGross > 0 ? netAvg / est.avgGross : 1)
-  return { net: Math.round(annualNet), gross: est.annualIncome }
+  return { net: est.annualNet, gross: est.annualIncome }
 }
 
 /** 旧シグネチャ互換 */

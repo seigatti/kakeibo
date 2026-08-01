@@ -221,6 +221,16 @@ export default function SalaryCard({ persons }: Props) {
             </span>
             <b>{est.annualSocial > 0 ? yen(est.annualSocial) : '社保の入力なし'}</b>
           </div>
+          <div className="kv">
+            <span className="muted">
+              手取り年収想定
+              <HelpTip title="手取り年収想定の式">
+                手取り月平均（総支給 − 控除合計）×12ヶ月 ＋ ボーナス合計×手取り率（手取り月平均÷平均月総支給）。<br />
+                控除合計 ＝ 健保＋厚年＋雇用＋介護＋所得税＋住民税。上の年収想定と同じ給与ベースで、その他収入は含みません。
+              </HelpTip>
+            </span>
+            <b>{yen(est.annualNet)}</b>
+          </div>
           {est.usedAvgAsBonusBase && (
             <p className="muted" style={{ fontSize: 12, margin: '4px 0' }}>※ボーナス基準月額が未入力のため平均総支給で代用しています</p>
           )}

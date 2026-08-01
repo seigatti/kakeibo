@@ -688,6 +688,7 @@ export interface SalaryEstimate {
   monthlyBonus: Array<{ month: number; amount: number; months: number | null; manual: boolean }>
   annualIncome: number // 年収想定 = 基準給与12ヶ月分 + ボーナス合計
   annualSocial: number // 社会保険料想定
+  annualNet: number // 手取り年収想定 = 手取り月平均×12 + ボーナス×手取り率
   bonusTotal: number
   avgGross: number
   enteredMonths: number
@@ -771,11 +772,16 @@ export function estimateSalary(entries: FurusatoSalary[], bonusBase: number | nu
     annualSocial = avgSocial * 12 + (avgGross > 0 ? bonusTotal * (avgSocial / avgGross) : 0)
   }
 
+  // 手取り年収想定 = 手取り月平均（総支給−控除合計）×12 + ボーナス×手取り率
+  const netAvg = withGross.reduce((s, e) => s + ((e.gross ?? 0) - (deductionTotal(e) ?? 0)), 0) / withGross.length
+  const annualNet = netAvg * 12 + bonusTotal * (avgGross > 0 ? netAvg / avgGross : 1)
+
   return {
     monthlyGross,
     monthlyBonus,
     annualIncome: Math.round(annualIncome),
     annualSocial: Math.round(annualSocial),
+    annualNet: Math.round(annualNet),
     bonusTotal: Math.round(bonusTotal),
     avgGross: Math.round(avgGross),
     enteredMonths: withGross.length,

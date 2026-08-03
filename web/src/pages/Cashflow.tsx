@@ -3,11 +3,15 @@ import { Chart, Line } from 'react-chartjs-2'
 import { useStore } from '../store'
 import { CONSUMPTION_UNITS, DEFAULT_CATEGORIES } from '../types'
 import HelpTip from '../components/HelpTip'
+import PeriodPicker, { usePeriod } from '../components/PeriodPicker'
 import { DEFAULT_PERSONS } from '../types'
 import { addMonths, categoryStats, dataMonthRange, DEFAULT_PRINCIPAL_CAP, effectiveIncomeByMonth, estimateOtherExpense, expenseByMonth, fixedMonthlyTotal, monthRange, netSalaryByMonth, nonInvestBreakdownByMonth, otherIncomeByMonth, thisMonth, yen, yenShort } from '../utils'
 import SalaryCard from './SalaryCard'
 
 const PALETTE = ['#38bdf8', '#4ade80', '#fbbf24', '#f87171', '#c084fc', '#fb923c', '#2dd4bf', '#a3e635']
+
+// 全期間表示でも横軸ラベルが潰れないように間引く
+const xTicks = { ticks: { maxTicksLimit: 12, maxRotation: 0 } }
 
 export default function Cashflow() {
   const { data, mutate, saving } = useStore()
@@ -17,9 +21,6 @@ export default function Cashflow() {
   const [newCat, setNewCat] = useState('')
   const [extraCats, setExtraCats] = useState<string[]>([])
   const [msg, setMsg] = useState('')
-  const [statPreset, setStatPreset] = useState<'year' | '12m' | 'all' | 'custom'>('12m')
-  const [statFrom, setStatFrom] = useState('')
-  const [statTo, setStatTo] = useState('')
 
   const persons = useMemo(() => {
     const raw = data?.settings.find((s) => s.key === 'furusato_persons')?.value
@@ -75,7 +76,9 @@ export default function Cashflow() {
     () => (data ? dataMonthRange(data.expenses, [], [...netByMonth.keys(), ...otherByMonth.keys()]) : []),
     [data, netByMonth, otherByMonth],
   )
-  const chartMonths = months.slice(-24)
+  // 表示期間（このタブのグラフ・集計すべてが参照。既定=全期間）
+  const period = usePeriod(months.length ? months[0] : thisMonth())
+  const chartMonths = useMemo(() => monthRange(period.from, period.to), [period.from, period.to])
   const expMap = useMemo(() => expenseByMonth(data?.expenses ?? []), [data])
   const incMap = useMemo(() => effectiveIncomeByMonth(data?.furusato_salaries ?? []), [data])
   const fixedOf = (m: string) => fixedMonthlyTotal(data?.fixed_costs ?? [], m)
@@ -103,22 +106,8 @@ export default function Cashflow() {
     return m
   }, [data])
 
-  // カテゴリ別の期間集計
-  const earliestMonth = useMemo(() => {
-    const ms = [...(data?.expenses ?? []).map((e) => e.month)]
-    return ms.length ? ms.sort()[0] : thisMonth()
-  }, [data])
-  const [statRangeFrom, statRangeTo] = useMemo((): [string, string] => {
-    const now = thisMonth()
-    if (statPreset === 'year') return [`${now.slice(0, 4)}-01`, now]
-    if (statPreset === '12m') return [addMonths(now, -11), now]
-    if (statPreset === 'custom' && statFrom && statTo) return [statFrom, statTo]
-    return [earliestMonth, now]
-  }, [statPreset, statFrom, statTo, earliestMonth])
-  const stats = useMemo(
-    () => (data ? categoryStats(data.expenses, monthRange(statRangeFrom, statRangeTo)) : []),
-    [data, statRangeFrom, statRangeTo],
-  )
+  // カテゴリ別の集計（上の期間ピッカーに追従）
+  const stats = useMemo(() => (data ? categoryStats(data.expenses, chartMonths) : []), [data, chartMonths])
 
   // その他支出の推計: 収入 − 固定費 − 変動費 − 非投資の資産増減（Δ現金＋Δ投資元本。年金は除外）
   // |Δ投資元本| がしきい値を超える月は売買とみなし Δ元本を除外（設定 principal_cap で変更可）
@@ -178,6 +167,8 @@ export default function Cashflow() {
 
       <SalaryCard persons={persons} />
 
+      {months.length >= 2 && <PeriodPicker period={period} note="下のグラフ・集計 共通" />}
+
       {chartMonths.length >= 2 && (
         <>
           <div className="card">
@@ -229,7 +220,7 @@ export default function Cashflow() {
                 options={{
                   maintainAspectRatio: false,
                   interaction: { mode: 'index', intersect: false },
-                  scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: (v) => yenShort(Number(v)) } } },
+                  scales: { x: { stacked: true, ...xTicks }, y: { stacked: true, ticks: { callback: (v) => yenShort(Number(v)) } } },
                 }}
               />
             </div>
@@ -320,7 +311,7 @@ export default function Cashflow() {
                   maintainAspectRatio: false,
                   spanGaps: true,
                   interaction: { mode: 'index', intersect: false },
-                  scales: { y: { ticks: { callback: (v) => yenShort(Number(v)) } } },
+                  scales: { y: { ticks: { callback: (v) => yenShort(Number(v)) } }, x: xTicks },
                 }}
               />
             </div>
@@ -328,26 +319,12 @@ export default function Cashflow() {
 
           <div className="card">
             <h2>
-              カテゴリ別の集計（期間指定）
+              カテゴリ別の集計
               <HelpTip title="カテゴリ別の集計">
-                指定した期間の変動費カテゴリごとに、合計・平均・最大・最小・記録した月数を表示します。
+                上で選んだ期間の変動費カテゴリごとに、合計・平均・最大・最小・記録した月数を表示します。
                 平均は「記録のある月」で割った値です（金額を入れなかった月は分母に含みません）。
               </HelpTip>
             </h2>
-            <div className="seg">
-              {([['year', '今年'], ['12m', '過去12ヶ月'], ['all', '全期間'], ['custom', '期間指定']] as const).map(([p, label]) => (
-                <button key={p} className={statPreset === p ? 'on' : ''} onClick={() => setStatPreset(p)}>{label}</button>
-              ))}
-            </div>
-            {statPreset === 'custom' && (
-              <div className="row2">
-                <label className="field">開始月
-                  <input type="month" value={statFrom || earliestMonth} onChange={(e) => setStatFrom(e.target.value)} /></label>
-                <label className="field">終了月
-                  <input type="month" value={statTo || thisMonth()} onChange={(e) => setStatTo(e.target.value)} /></label>
-              </div>
-            )}
-            <p className="muted" style={{ fontSize: 12, margin: '0 0 6px' }}>{statRangeFrom} 〜 {statRangeTo}</p>
             {stats.length === 0 ? (
               <p className="muted" style={{ fontSize: 13 }}>この期間に変動費の記録がありません</p>
             ) : (
@@ -402,6 +379,7 @@ export default function Cashflow() {
                       maintainAspectRatio: false,
                       spanGaps: true,
                       interaction: { mode: 'index', intersect: false },
+                      scales: { x: xTicks },
                     }}
                   />
                 </div>
@@ -431,6 +409,7 @@ export default function Cashflow() {
                       maintainAspectRatio: false,
                       spanGaps: true,
                       interaction: { mode: 'index', intersect: false },
+                      scales: { x: xTicks },
                     }}
                   />
                 </div>

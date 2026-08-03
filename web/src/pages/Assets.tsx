@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Bar, Line } from 'react-chartjs-2'
 import HelpTip from '../components/HelpTip'
+import PeriodPicker, { inRange, usePeriod } from '../components/PeriodPicker'
 import { useStore } from '../store'
-import { assetTotal, sortedAssets, today, yen, yenShort } from '../utils'
+import { assetTotal, sortedAssets, thisMonth, today, yen, yenShort } from '../utils'
 import LiabilityCard from './LiabilityCard'
 
-type Range = '1y' | '3y' | 'all'
-
 const PREFILL_KEYS = ['investment', 'cash', 'pension', 'profit', 'gain'] as const
+
+// 全期間表示でも横軸ラベルが潰れないように間引く
+const xTicks = { ticks: { maxTicksLimit: 12, maxRotation: 0 } }
 
 export default function Assets({ prefill }: { prefill: URLSearchParams }) {
   const { data, mutate, saving } = useStore()
@@ -18,11 +20,12 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
   const [profit, setProfit] = useState('')
   const [gain, setGain] = useState('')
   const [memo, setMemo] = useState('')
-  const [range, setRange] = useState<Range>('1y')
   const [msg, setMsg] = useState('')
   const appliedPrefill = useRef<string | null>(null)
 
   const assets = useMemo(() => sortedAssets(data?.assets ?? []), [data])
+  // 表示期間（このタブの3グラフ共通。既定=全期間）
+  const period = usePeriod(assets.length ? assets[0].date.slice(0, 7) : thisMonth())
 
   const num = (s: string | undefined) => (!s || s.trim() === '' ? null : Number(s.replace(/[,，]/g, '')))
 
@@ -73,14 +76,10 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, prefill])
 
-  const filtered = useMemo(() => {
-    if (range === 'all') return assets
-    const years = range === '1y' ? 1 : 3
-    const limit = new Date()
-    limit.setFullYear(limit.getFullYear() - years)
-    const lim = limit.toISOString().slice(0, 10)
-    return assets.filter((a) => a.date >= lim)
-  }, [assets, range])
+  const filtered = useMemo(
+    () => assets.filter((a) => inRange(a.date.slice(0, 7), period.from, period.to)),
+    [assets, period.from, period.to],
+  )
 
   const profits = filtered.filter((a) => a.mf_profit !== null)
 
@@ -107,7 +106,7 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
   const lineOpts = {
     maintainAspectRatio: false,
     interaction: { mode: 'index' as const, intersect: false },
-    scales: { y: { ticks: { callback: (v: unknown) => yenShort(Number(v)) } } },
+    scales: { y: { ticks: { callback: (v: unknown) => yenShort(Number(v)) } }, x: xTicks },
     spanGaps: true,
   }
 
@@ -139,16 +138,11 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
         {msg && <p className="pos center" style={{ margin: '8px 0 0' }}>{msg}</p>}
       </div>
 
-      {assets.length >= 2 && (
+      {assets.length >= 2 && <PeriodPicker period={period} note="下の資産グラフ共通" />}
+
+      {filtered.length >= 2 && (
         <div className="card">
           <h2>資産推移</h2>
-          <div className="seg">
-            {(['1y', '3y', 'all'] as Range[]).map((r) => (
-              <button key={r} className={range === r ? 'on' : ''} onClick={() => setRange(r)}>
-                {r === '1y' ? '1年' : r === '3y' ? '3年' : '全期間'}
-              </button>
-            ))}
-          </div>
           <div className="chart-box">
             <Line
               data={{
@@ -209,7 +203,7 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
               options={{
                 maintainAspectRatio: false,
                 plugins: { legend: { display: false } },
-                scales: { y: { ticks: { callback: (v) => yenShort(Number(v)) } } },
+                scales: { y: { ticks: { callback: (v) => yenShort(Number(v)) } }, x: xTicks },
               }}
             />
           </div>

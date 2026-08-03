@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Bar, Chart, Doughnut, Line } from 'react-chartjs-2'
 import HelpTip from '../components/HelpTip'
+import PeriodPicker, { inRange, usePeriod } from '../components/PeriodPicker'
 import { CONSUMPTION_UNITS, type AllData } from '../types'
 import {
-  addMonths,
   assetAllocationTrend,
   assetTotal,
   categoryStats,
@@ -29,18 +29,6 @@ import {
   yenShort,
 } from '../utils'
 
-type Preset = 'year' | '12m' | 'all' | 'custom'
-
-/** プリセット→[開始月, 終了月]。custom は両方入力済みのときのみ採用、既定は最古〜当月 */
-function rangeOf(preset: Preset, month: string, earliest: string, cf: string, ct: string): [string, string] {
-  if (preset === 'year') return [`${month.slice(0, 4)}-01`, month]
-  if (preset === '12m') return [addMonths(month, -11), month]
-  if (preset === 'custom' && cf && ct) return [cf, ct]
-  return [earliest, month]
-}
-
-const PRESETS: [Preset, string][] = [['year', '今年'], ['12m', '過去12ヶ月'], ['all', '全期間'], ['custom', '期間指定']]
-
 const PALETTE = ['#38bdf8', '#4ade80', '#fbbf24', '#f87171', '#c084fc', '#fb923c', '#2dd4bf', '#a3e635', '#f472b6', '#60a5fa']
 
 const donutOpts = (items: { value: number }[]) => {
@@ -60,6 +48,9 @@ const donutOpts = (items: { value: number }[]) => {
   }
 }
 
+// 全期間表示でも横軸ラベルが潰れないように間引く
+const xTicks = { ticks: { maxTicksLimit: 12, maxRotation: 0 } }
+
 export default function HomeGraphs({ data }: { data: AllData }) {
   const principalCap = useMemo(() => {
     const raw = data.settings.find((s) => s.key === 'principal_cap')?.value
@@ -71,21 +62,25 @@ export default function HomeGraphs({ data }: { data: AllData }) {
   const assets = useMemo(() => sortedAssets(data.assets), [data])
   const latest = assets[assets.length - 1]
   const prev = assets[assets.length - 2]
+  const liabilities = data.liabilities ?? []
 
-  // ---- 期間集計の状態 ----
-  const [preset, setPreset] = useState<Preset>('all')
-  const [customFrom, setCustomFrom] = useState('')
-  const [customTo, setCustomTo] = useState('')
-  // ---- 貯蓄率の期間指定 ----
-  const [srPreset, setSrPreset] = useState<Preset>('12m')
-  const [srFrom, setSrFrom] = useState('')
-  const [srTo, setSrTo] = useState('')
-  // ---- カテゴリ別集計の期間指定 ----
-  const [statPreset, setStatPreset] = useState<Preset>('12m')
-  const [statFrom, setStatFrom] = useState('')
-  const [statTo, setStatTo] = useState('')
+  // ---- 各セクションのデータ最古月（期間ピッカーの「全期間」起点） ----
+  const assetEarliest = assets.length ? assets[0].date.slice(0, 7) : month
+  const netByMonth = useMemo(() => netSalaryByMonth(data.furusato_salaries ?? []), [data])
+  const otherByMonth = useMemo(() => otherIncomeByMonth(data.furusato_salaries ?? []), [data])
+  const months = useMemo(() => dataMonthRange(data.expenses, [], [...netByMonth.keys(), ...otherByMonth.keys()]), [data, netByMonth, otherByMonth])
+  const cfEarliest = months.length ? months[0] : month
+  const consEarliest = useMemo(() => {
+    const ms = (data.consumption ?? []).filter((c) => c.quantity > 0).map((c) => c.month)
+    return ms.length ? ms.sort()[0] : month
+  }, [data, month])
 
-  // ---- 資産 ----
+  // ---- セクションごとの表示期間（既定=全期間） ----
+  const assetP = usePeriod(assetEarliest)
+  const cfP = usePeriod(cfEarliest)
+  const consP = usePeriod(consEarliest)
+
+  // ---- 資産（assetP に追従） ----
   const allocation = useMemo(() => {
     const items = [
       { label: '投資', value: latest?.investment ?? 0, color: '#4ade80' },
@@ -94,22 +89,27 @@ export default function HomeGraphs({ data }: { data: AllData }) {
     ].filter((a) => a.value > 0)
     return { items, total: items.reduce((s, a) => s + a.value, 0) }
   }, [latest])
-  const allocTrend = useMemo(() => assetAllocationTrend(data.assets).slice(-24), [data])
-  const liabilities = data.liabilities ?? []
-  const netWorthSeries = useMemo(() => netWorthByMonth(data.assets, liabilities).slice(-24), [data, liabilities])
-  const assetRecent = assets.slice(-24)
-  const profits = assets.filter((a) => a.mf_profit !== null).slice(-24)
+  const assetRecent = useMemo(
+    () => assets.filter((a) => inRange(a.date.slice(0, 7), assetP.from, assetP.to)),
+    [assets, assetP.from, assetP.to],
+  )
+  const allocTrend = useMemo(
+    () => assetAllocationTrend(data.assets).filter((p) => inRange(p.month, assetP.from, assetP.to)),
+    [data, assetP.from, assetP.to],
+  )
+  const netWorthSeries = useMemo(
+    () => netWorthByMonth(data.assets, liabilities).filter((p) => inRange(p.month, assetP.from, assetP.to)),
+    [data, liabilities, assetP.from, assetP.to],
+  )
+  const profits = assetRecent.filter((a) => a.mf_profit !== null)
   const gains = useMemo(() => {
     const byMonth = new Map<string, number>()
-    for (const a of assets) if (a.monthly_gain !== null) byMonth.set(a.date.slice(0, 7), a.monthly_gain)
-    return [...byMonth.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(-24)
-  }, [assets])
+    for (const a of assetRecent) if (a.monthly_gain !== null) byMonth.set(a.date.slice(0, 7), a.monthly_gain)
+    return [...byMonth.entries()].sort(([a], [b]) => a.localeCompare(b))
+  }, [assetRecent])
 
-  // ---- 収支 ----
-  const netByMonth = useMemo(() => netSalaryByMonth(data.furusato_salaries ?? []), [data])
-  const otherByMonth = useMemo(() => otherIncomeByMonth(data.furusato_salaries ?? []), [data])
-  const months = useMemo(() => dataMonthRange(data.expenses, [], [...netByMonth.keys(), ...otherByMonth.keys()]), [data, netByMonth, otherByMonth])
-  const chartMonths = months.slice(-24)
+  // ---- 収支（cfP に追従） ----
+  const chartMonths = useMemo(() => monthRange(cfP.from, cfP.to), [cfP.from, cfP.to])
   const incMap = useMemo(() => effectiveIncomeByMonth(data.furusato_salaries ?? []), [data])
   const expMap = useMemo(() => expenseByMonth(data.expenses), [data])
   const breakdown = useMemo(() => nonInvestBreakdownByMonth(data.assets, principalCap), [data, principalCap])
@@ -126,14 +126,8 @@ export default function HomeGraphs({ data }: { data: AllData }) {
     return byCat
   }, [data])
 
-  const earliestMonth = months.length ? months[0] : month
-
-  // 貯蓄率（期間指定）＋ 最大/平均/最小
-  const [srFromR, srToR] = rangeOf(srPreset, month, earliestMonth, srFrom, srTo)
-  const savingsRate = useMemo(
-    () => savingsRateByMonth(data, monthRange(srFromR, srToR), principalCap),
-    [data, srFromR, srToR, principalCap],
-  )
+  // 貯蓄率＋最大/平均/最小
+  const savingsRate = useMemo(() => savingsRateByMonth(data, chartMonths, principalCap), [data, chartMonths, principalCap])
   const srStats = useMemo(() => {
     if (savingsRate.length === 0) return null
     const rates = savingsRate.map((p) => p.rate)
@@ -144,17 +138,12 @@ export default function HomeGraphs({ data }: { data: AllData }) {
     }
   }, [savingsRate])
 
-  // カテゴリ別の集計（期間指定）
-  const [statFromR, statToR] = rangeOf(statPreset, month, earliestMonth, statFrom, statTo)
-  const stats = useMemo(() => categoryStats(data.expenses, monthRange(statFromR, statToR)), [data, statFromR, statToR])
-
-  const composition = useMemo(
-    () => expenseComposition(data, chartMonths.slice(-12), principalCap),
-    [data, chartMonths, principalCap],
-  )
+  const stats = useMemo(() => categoryStats(data.expenses, chartMonths), [data, chartMonths])
+  const composition = useMemo(() => expenseComposition(data, chartMonths, principalCap), [data, chartMonths, principalCap])
   const fixedBreakdown = useMemo(() => fixedCostBreakdown(data.fixed_costs, month), [data, month])
 
-  // ---- 消費量 ----
+  // ---- 消費量（consP に追従） ----
+  const consMonths = useMemo(() => monthRange(consP.from, consP.to), [consP.from, consP.to])
   const consumptionCats = useMemo(() => {
     const has = new Set((data.consumption ?? []).filter((c) => c.quantity > 0).map((c) => c.category))
     return Object.keys(CONSUMPTION_UNITS).filter((c) => has.has(c))
@@ -168,7 +157,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
     return m
   }, [data])
 
-  // ---- 今月の収支・純資産・期間集計 ----
+  // ---- 時点スナップショット（期間ピッカーの影響を受けない） ----
   const curIncome = incMap.get(month) ?? 0
   const curVariable = expMap.get(month) ?? 0
   const curFixed = fixedOf(month)
@@ -176,8 +165,8 @@ export default function HomeGraphs({ data }: { data: AllData }) {
   const liabilityTotal = totalLiabilitiesAt(liabilities, month)
   const netWorthNow = (latest ? assetTotal(latest) : 0) - liabilityTotal
 
-  const [from, to] = rangeOf(preset, month, earliestMonth, customFrom, customTo)
-  const sum = useMemo(() => periodSummary(data, from, to, principalCap), [data, from, to, principalCap])
+  // 期間集計（cfP に追従）
+  const sum = useMemo(() => periodSummary(data, cfP.from, cfP.to, principalCap), [data, cfP.from, cfP.to, principalCap])
   const cumulative = useMemo(() => {
     let cin = 0
     let cout = 0
@@ -192,6 +181,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
   const showLabels = cumulative.length <= 13
 
   const yenAxis = { y: { ticks: { callback: (v: unknown) => yenShort(Number(v)) } } }
+  const monthYenScales = { ...yenAxis, x: xTicks }
   const lbl = (m: string) => m.slice(2)
 
   return (
@@ -250,6 +240,8 @@ export default function HomeGraphs({ data }: { data: AllData }) {
           </div>
         )}
 
+        {assets.length >= 2 && <PeriodPicker period={assetP} note="下の資産グラフ共通" />}
+
         {assetRecent.length >= 2 && (
           <div className="card">
             <h2>資産推移（内訳）</h2>
@@ -264,7 +256,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
                     { label: '年金', data: assetRecent.map((a) => a.pension), borderColor: '#c084fc', tension: 0.3, pointRadius: 0 },
                   ],
                 }}
-                options={{ maintainAspectRatio: false, spanGaps: true, interaction: { mode: 'index', intersect: false }, scales: yenAxis }}
+                options={{ maintainAspectRatio: false, spanGaps: true, interaction: { mode: 'index', intersect: false }, scales: monthYenScales }}
               />
             </div>
           </div>
@@ -286,7 +278,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
                 options={{
                   maintainAspectRatio: false,
                   interaction: { mode: 'index', intersect: false },
-                  scales: { y: { min: 0, max: 100, ticks: { callback: (v) => `${v}%` } }, x: { ticks: { maxTicksLimit: 8, maxRotation: 0 } } },
+                  scales: { y: { min: 0, max: 100, ticks: { callback: (v) => `${v}%` } }, x: xTicks },
                   plugins: { datalabels: { display: false }, tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y}%` } } },
                 }}
               />
@@ -307,7 +299,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
                     { label: '純資産', data: netWorthSeries.map((p) => p.netWorth), borderColor: '#4ade80', backgroundColor: 'rgba(74,222,128,0.12)', fill: true, tension: 0.3, pointRadius: 0 },
                   ],
                 }}
-                options={{ maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: yenAxis }}
+                options={{ maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: monthYenScales }}
               />
             </div>
           </div>
@@ -319,7 +311,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
             <div className="chart-box small">
               <Line
                 data={{ labels: profits.map((a) => a.date.slice(2, 10)), datasets: [{ label: '評価損益', data: profits.map((a) => a.mf_profit), borderColor: '#4ade80', backgroundColor: 'rgba(74,222,128,0.15)', fill: true, tension: 0.3 }] }}
-                options={{ maintainAspectRatio: false, spanGaps: true, plugins: { legend: { display: false } }, scales: yenAxis }}
+                options={{ maintainAspectRatio: false, spanGaps: true, plugins: { legend: { display: false } }, scales: monthYenScales }}
               />
             </div>
           </div>
@@ -331,7 +323,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
             <div className="chart-box small">
               <Bar
                 data={{ labels: gains.map(([m]) => lbl(m)), datasets: [{ label: '今月の投資増減', data: gains.map(([, v]) => v), backgroundColor: gains.map(([, v]) => (v >= 0 ? '#4ade80' : '#f87171')) }] }}
-                options={{ maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: yenAxis }}
+                options={{ maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: monthYenScales }}
               />
             </div>
           </div>
@@ -371,9 +363,11 @@ export default function HomeGraphs({ data }: { data: AllData }) {
           </div>
         </div>
 
+        <PeriodPicker period={cfP} note="下の収支の集計・グラフ共通" />
+
         <div className="card">
           <h2>
-            期間集計（{from} 〜 {to}・{sum.months.length}ヶ月）
+            期間集計（{cfP.from} 〜 {cfP.to}・{sum.months.length}ヶ月）
             <HelpTip title="期間集計の定義">
               ・収入合計: 各月の実効収入（給与明細の手取り＋その他収入）
               {'\n'}・固定費: 固定費タブの月割り額の合計
@@ -383,19 +377,6 @@ export default function HomeGraphs({ data }: { data: AllData }) {
               {'\n'}・期間の資産増減: 期間開始前月末と期間末の資産スナップショットの差（投資の値動き込み）
             </HelpTip>
           </h2>
-          <div className="seg">
-            {([['year', '今年'], ['12m', '過去12ヶ月'], ['all', '全期間'], ['custom', '期間指定']] as [Preset, string][]).map(([p, label]) => (
-              <button key={p} className={preset === p ? 'on' : ''} onClick={() => setPreset(p)}>{label}</button>
-            ))}
-          </div>
-          {preset === 'custom' && (
-            <div className="row2">
-              <label className="field">開始月
-                <input type="month" value={customFrom || earliestMonth} onChange={(e) => setCustomFrom(e.target.value)} /></label>
-              <label className="field">終了月
-                <input type="month" value={customTo || month} onChange={(e) => setCustomTo(e.target.value)} /></label>
-            </div>
-          )}
           <div className="kv"><span className="muted">収入合計（手取り）</span><b className="pos">{yen(sum.income)}</b></div>
           <div className="kv"><span className="muted">支出合計</span><b className="neg">{yen(sum.expense)}</b></div>
           <div className="kv" style={{ paddingLeft: 12 }}><span className="muted">　固定費</span><span>{yen(sum.fixed)}</span></div>
@@ -458,7 +439,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
                     { type: 'line' as const, label: '収支', data: chartMonths.map((m) => (incMap.get(m) ?? 0) - totalExp(m)), borderColor: '#38bdf8', tension: 0.3, stack: 'balance' },
                   ],
                 }}
-                options={{ maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: (v) => yenShort(Number(v)) } } } }}
+                options={{ maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { x: { stacked: true, ...xTicks }, y: { stacked: true, ticks: { callback: (v) => yenShort(Number(v)) } } } }}
               />
             </div>
           </div>
@@ -466,22 +447,8 @@ export default function HomeGraphs({ data }: { data: AllData }) {
           <div className="card">
             <h2>
               貯蓄率の推移
-              <HelpTip title="貯蓄率">その月の (収入 − 支出) ÷ 収入 × 100 です。支出は固定費＋変動費＋その他支出。プラスが大きいほど収入のうち多くを貯蓄・投資に回せています（マイナスは赤字）。<br />最大・平均・最小は選んだ期間の各月の貯蓄率から算出（平均は各月％の単純平均）。収入0の月は除外します。</HelpTip>
+              <HelpTip title="貯蓄率">その月の (収入 − 支出) ÷ 収入 × 100 です。支出は固定費＋変動費＋その他支出。プラスが大きいほど収入のうち多くを貯蓄・投資に回せています（マイナスは赤字）。<br />最大・平均・最小は上で選んだ期間の各月の貯蓄率から算出（平均は各月％の単純平均）。収入0の月は除外します。</HelpTip>
             </h2>
-            <div className="seg">
-              {PRESETS.map(([p, label]) => (
-                <button key={p} className={srPreset === p ? 'on' : ''} onClick={() => setSrPreset(p)}>{label}</button>
-              ))}
-            </div>
-            {srPreset === 'custom' && (
-              <div className="row2">
-                <label className="field">開始月
-                  <input type="month" value={srFrom || earliestMonth} onChange={(e) => setSrFrom(e.target.value)} /></label>
-                <label className="field">終了月
-                  <input type="month" value={srTo || month} onChange={(e) => setSrTo(e.target.value)} /></label>
-              </div>
-            )}
-            <p className="muted" style={{ fontSize: 12, margin: '0 0 6px' }}>{srFromR} 〜 {srToR}</p>
             {srStats ? (
               <>
                 <div className="kv"><span className="muted">最大</span><b className="pos">{srStats.max}%</b></div>
@@ -490,7 +457,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
                 <div className="chart-box small" style={{ marginTop: 8 }}>
                   <Bar
                     data={{ labels: savingsRate.map((p) => lbl(p.month)), datasets: [{ label: '貯蓄率', data: savingsRate.map((p) => p.rate), backgroundColor: savingsRate.map((p) => (p.rate >= 0 ? '#4ade80' : '#f87171')) }] }}
-                    options={{ maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `貯蓄率: ${ctx.parsed.y}%` } } }, scales: { y: { ticks: { callback: (v) => `${v}%` } } } }}
+                    options={{ maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `貯蓄率: ${ctx.parsed.y}%` } } }, scales: { y: { ticks: { callback: (v) => `${v}%` } }, x: xTicks } }}
                   />
                 </div>
               </>
@@ -503,7 +470,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
             <div className="card">
               <h2>
                 支出のカテゴリ構成比
-                <HelpTip title="支出構成比">直近12ヶ月の支出の内訳（固定費・変動費カテゴリ別・その他支出）の割合です。何にお金がかかっているかを把握できます。</HelpTip>
+                <HelpTip title="支出構成比">上で選んだ期間の支出の内訳（固定費・変動費カテゴリ別・その他支出）の割合です。何にお金がかかっているかを把握できます。</HelpTip>
               </h2>
               <div className="chart-box small">
                 <Doughnut
@@ -518,7 +485,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
             <div className="card">
               <h2>
                 固定費の内訳（月割り）
-                <HelpTip title="固定費の内訳">固定費タブに登録した各項目の月割り額（年払い・2年払いは月換算）の内訳です。</HelpTip>
+                <HelpTip title="固定費の内訳">固定費タブに登録した各項目の月割り額（年払い・2年払いは月換算）の内訳です。今月（{month}）時点の登録内容なので、期間の指定は影響しません。</HelpTip>
               </h2>
               <div className="chart-box small">
                 <Doughnut
@@ -534,33 +501,19 @@ export default function HomeGraphs({ data }: { data: AllData }) {
             <div className="chart-box">
               <Line
                 data={{ labels: chartMonths.map(lbl), datasets: [...catTrend.entries()].map(([cat, map], i) => ({ label: cat, data: chartMonths.map((m) => map.get(m) ?? null), borderColor: PALETTE[i % PALETTE.length], tension: 0.3 })) }}
-                options={{ maintainAspectRatio: false, spanGaps: true, interaction: { mode: 'index', intersect: false }, scales: yenAxis }}
+                options={{ maintainAspectRatio: false, spanGaps: true, interaction: { mode: 'index', intersect: false }, scales: monthYenScales }}
               />
             </div>
           </div>
 
           <div className="card">
             <h2>
-              カテゴリ別の集計（期間指定）
+              カテゴリ別の集計
               <HelpTip title="カテゴリ別の集計">
-                指定した期間の変動費カテゴリごとに、合計・平均・最大・最小・記録した月数を表示します。
+                上で選んだ期間の変動費カテゴリごとに、合計・平均・最大・最小・記録した月数を表示します。
                 平均は「記録のある月」で割った値です（金額を入れなかった月は分母に含みません）。
               </HelpTip>
             </h2>
-            <div className="seg">
-              {PRESETS.map(([p, label]) => (
-                <button key={p} className={statPreset === p ? 'on' : ''} onClick={() => setStatPreset(p)}>{label}</button>
-              ))}
-            </div>
-            {statPreset === 'custom' && (
-              <div className="row2">
-                <label className="field">開始月
-                  <input type="month" value={statFrom || earliestMonth} onChange={(e) => setStatFrom(e.target.value)} /></label>
-                <label className="field">終了月
-                  <input type="month" value={statTo || month} onChange={(e) => setStatTo(e.target.value)} /></label>
-              </div>
-            )}
-            <p className="muted" style={{ fontSize: 12, margin: '0 0 6px' }}>{statFromR} 〜 {statToR}</p>
             {stats.length === 0 ? (
               <p className="muted" style={{ fontSize: 13 }}>この期間に変動費の記録がありません</p>
             ) : (
@@ -597,16 +550,18 @@ export default function HomeGraphs({ data }: { data: AllData }) {
       </details>
 
       {/* ===================== 消費量 ===================== */}
-      {consumptionCats.length > 0 && chartMonths.length >= 2 && (
+      {consumptionCats.length > 0 && (
         <details open className="graph-section">
           <summary>⚡ 消費量のグラフ</summary>
+
+          <PeriodPicker period={consP} note="下の消費量グラフ共通" />
 
           <div className="card">
             <h2>消費量の推移</h2>
             <div className="chart-box">
               <Line
-                data={{ labels: chartMonths.map(lbl), datasets: consumptionCats.map((cat, i) => ({ label: `${cat}(${CONSUMPTION_UNITS[cat]})`, data: chartMonths.map((m) => qtyByCat.get(cat)?.get(m) ?? null), borderColor: PALETTE[i % PALETTE.length], tension: 0.3 })) }}
-                options={{ maintainAspectRatio: false, spanGaps: true, interaction: { mode: 'index', intersect: false } }}
+                data={{ labels: consMonths.map(lbl), datasets: consumptionCats.map((cat, i) => ({ label: `${cat}(${CONSUMPTION_UNITS[cat]})`, data: consMonths.map((m) => qtyByCat.get(cat)?.get(m) ?? null), borderColor: PALETTE[i % PALETTE.length], tension: 0.3 })) }}
+                options={{ maintainAspectRatio: false, spanGaps: true, interaction: { mode: 'index', intersect: false }, scales: { x: xTicks } }}
               />
             </div>
           </div>
@@ -616,10 +571,10 @@ export default function HomeGraphs({ data }: { data: AllData }) {
             <div className="chart-box">
               <Line
                 data={{
-                  labels: chartMonths.map(lbl),
+                  labels: consMonths.map(lbl),
                   datasets: consumptionCats.map((cat, i) => ({
                     label: `${cat}(円/${CONSUMPTION_UNITS[cat]})`,
-                    data: chartMonths.map((m) => {
+                    data: consMonths.map((m) => {
                       const q = qtyByCat.get(cat)?.get(m)
                       const amount = data.expenses.find((e) => e.month === m && e.category === cat)?.amount
                       return q && q > 0 && amount ? Math.round((amount / q) * 10) / 10 : null
@@ -628,7 +583,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
                     tension: 0.3,
                   })),
                 }}
-                options={{ maintainAspectRatio: false, spanGaps: true, interaction: { mode: 'index', intersect: false } }}
+                options={{ maintainAspectRatio: false, spanGaps: true, interaction: { mode: 'index', intersect: false }, scales: { x: xTicks } }}
               />
             </div>
           </div>

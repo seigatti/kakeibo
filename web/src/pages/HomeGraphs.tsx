@@ -6,6 +6,7 @@ import {
   addMonths,
   assetAllocationTrend,
   assetTotal,
+  categoryStats,
   DEFAULT_PRINCIPAL_CAP,
   dataMonthRange,
   effectiveIncomeByMonth,
@@ -14,6 +15,7 @@ import {
   expenseComposition,
   fixedCostBreakdown,
   fixedMonthlyTotal,
+  monthRange,
   netSalaryByMonth,
   netWorthByMonth,
   nonInvestBreakdownByMonth,
@@ -28,6 +30,16 @@ import {
 } from '../utils'
 
 type Preset = 'year' | '12m' | 'all' | 'custom'
+
+/** プリセット→[開始月, 終了月]。custom は両方入力済みのときのみ採用、既定は最古〜当月 */
+function rangeOf(preset: Preset, month: string, earliest: string, cf: string, ct: string): [string, string] {
+  if (preset === 'year') return [`${month.slice(0, 4)}-01`, month]
+  if (preset === '12m') return [addMonths(month, -11), month]
+  if (preset === 'custom' && cf && ct) return [cf, ct]
+  return [earliest, month]
+}
+
+const PRESETS: [Preset, string][] = [['year', '今年'], ['12m', '過去12ヶ月'], ['all', '全期間'], ['custom', '期間指定']]
 
 const PALETTE = ['#38bdf8', '#4ade80', '#fbbf24', '#f87171', '#c084fc', '#fb923c', '#2dd4bf', '#a3e635', '#f472b6', '#60a5fa']
 
@@ -64,6 +76,14 @@ export default function HomeGraphs({ data }: { data: AllData }) {
   const [preset, setPreset] = useState<Preset>('all')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
+  // ---- 貯蓄率の期間指定 ----
+  const [srPreset, setSrPreset] = useState<Preset>('12m')
+  const [srFrom, setSrFrom] = useState('')
+  const [srTo, setSrTo] = useState('')
+  // ---- カテゴリ別集計の期間指定 ----
+  const [statPreset, setStatPreset] = useState<Preset>('12m')
+  const [statFrom, setStatFrom] = useState('')
+  const [statTo, setStatTo] = useState('')
 
   // ---- 資産 ----
   const allocation = useMemo(() => {
@@ -106,7 +126,28 @@ export default function HomeGraphs({ data }: { data: AllData }) {
     return byCat
   }, [data])
 
-  const savingsRate = useMemo(() => savingsRateByMonth(data, chartMonths, principalCap), [data, chartMonths, principalCap])
+  const earliestMonth = months.length ? months[0] : month
+
+  // 貯蓄率（期間指定）＋ 最大/平均/最小
+  const [srFromR, srToR] = rangeOf(srPreset, month, earliestMonth, srFrom, srTo)
+  const savingsRate = useMemo(
+    () => savingsRateByMonth(data, monthRange(srFromR, srToR), principalCap),
+    [data, srFromR, srToR, principalCap],
+  )
+  const srStats = useMemo(() => {
+    if (savingsRate.length === 0) return null
+    const rates = savingsRate.map((p) => p.rate)
+    return {
+      max: Math.max(...rates),
+      min: Math.min(...rates),
+      avg: Math.round((rates.reduce((s, v) => s + v, 0) / rates.length) * 10) / 10,
+    }
+  }, [savingsRate])
+
+  // カテゴリ別の集計（期間指定）
+  const [statFromR, statToR] = rangeOf(statPreset, month, earliestMonth, statFrom, statTo)
+  const stats = useMemo(() => categoryStats(data.expenses, monthRange(statFromR, statToR)), [data, statFromR, statToR])
+
   const composition = useMemo(
     () => expenseComposition(data, chartMonths.slice(-12), principalCap),
     [data, chartMonths, principalCap],
@@ -135,13 +176,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
   const liabilityTotal = totalLiabilitiesAt(liabilities, month)
   const netWorthNow = (latest ? assetTotal(latest) : 0) - liabilityTotal
 
-  const earliestMonth = months.length ? months[0] : month
-  const [from, to] = useMemo((): [string, string] => {
-    if (preset === 'year') return [`${month.slice(0, 4)}-01`, month]
-    if (preset === '12m') return [addMonths(month, -11), month]
-    if (preset === 'custom' && customFrom && customTo) return [customFrom, customTo]
-    return [earliestMonth, month]
-  }, [preset, customFrom, customTo, earliestMonth, month])
+  const [from, to] = rangeOf(preset, month, earliestMonth, customFrom, customTo)
   const sum = useMemo(() => periodSummary(data, from, to, principalCap), [data, from, to, principalCap])
   const cumulative = useMemo(() => {
     let cin = 0
@@ -428,20 +463,41 @@ export default function HomeGraphs({ data }: { data: AllData }) {
             </div>
           </div>
 
-          {savingsRate.length >= 2 && (
-            <div className="card">
-              <h2>
-                貯蓄率の推移
-                <HelpTip title="貯蓄率">その月の (収入 − 支出) ÷ 収入 × 100 です。支出は固定費＋変動費＋その他支出。プラスが大きいほど収入のうち多くを貯蓄・投資に回せています（マイナスは赤字）。</HelpTip>
-              </h2>
-              <div className="chart-box small">
-                <Bar
-                  data={{ labels: savingsRate.map((p) => lbl(p.month)), datasets: [{ label: '貯蓄率', data: savingsRate.map((p) => p.rate), backgroundColor: savingsRate.map((p) => (p.rate >= 0 ? '#4ade80' : '#f87171')) }] }}
-                  options={{ maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `貯蓄率: ${ctx.parsed.y}%` } } }, scales: { y: { ticks: { callback: (v) => `${v}%` } } } }}
-                />
-              </div>
+          <div className="card">
+            <h2>
+              貯蓄率の推移
+              <HelpTip title="貯蓄率">その月の (収入 − 支出) ÷ 収入 × 100 です。支出は固定費＋変動費＋その他支出。プラスが大きいほど収入のうち多くを貯蓄・投資に回せています（マイナスは赤字）。<br />最大・平均・最小は選んだ期間の各月の貯蓄率から算出（平均は各月％の単純平均）。収入0の月は除外します。</HelpTip>
+            </h2>
+            <div className="seg">
+              {PRESETS.map(([p, label]) => (
+                <button key={p} className={srPreset === p ? 'on' : ''} onClick={() => setSrPreset(p)}>{label}</button>
+              ))}
             </div>
-          )}
+            {srPreset === 'custom' && (
+              <div className="row2">
+                <label className="field">開始月
+                  <input type="month" value={srFrom || earliestMonth} onChange={(e) => setSrFrom(e.target.value)} /></label>
+                <label className="field">終了月
+                  <input type="month" value={srTo || month} onChange={(e) => setSrTo(e.target.value)} /></label>
+              </div>
+            )}
+            <p className="muted" style={{ fontSize: 12, margin: '0 0 6px' }}>{srFromR} 〜 {srToR}</p>
+            {srStats ? (
+              <>
+                <div className="kv"><span className="muted">最大</span><b className="pos">{srStats.max}%</b></div>
+                <div className="kv"><span className="muted">平均</span><b>{srStats.avg}%</b></div>
+                <div className="kv"><span className="muted">最小</span><b className={srStats.min < 0 ? 'neg' : ''}>{srStats.min}%</b></div>
+                <div className="chart-box small" style={{ marginTop: 8 }}>
+                  <Bar
+                    data={{ labels: savingsRate.map((p) => lbl(p.month)), datasets: [{ label: '貯蓄率', data: savingsRate.map((p) => p.rate), backgroundColor: savingsRate.map((p) => (p.rate >= 0 ? '#4ade80' : '#f87171')) }] }}
+                    options={{ maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `貯蓄率: ${ctx.parsed.y}%` } } }, scales: { y: { ticks: { callback: (v) => `${v}%` } } } }}
+                  />
+                </div>
+              </>
+            ) : (
+              <p className="muted" style={{ fontSize: 13 }}>この期間に収入のある月がありません</p>
+            )}
+          </div>
 
           {composition.length > 0 && (
             <div className="card">
@@ -481,6 +537,60 @@ export default function HomeGraphs({ data }: { data: AllData }) {
                 options={{ maintainAspectRatio: false, spanGaps: true, interaction: { mode: 'index', intersect: false }, scales: yenAxis }}
               />
             </div>
+          </div>
+
+          <div className="card">
+            <h2>
+              カテゴリ別の集計（期間指定）
+              <HelpTip title="カテゴリ別の集計">
+                指定した期間の変動費カテゴリごとに、合計・平均・最大・最小・記録した月数を表示します。
+                平均は「記録のある月」で割った値です（金額を入れなかった月は分母に含みません）。
+              </HelpTip>
+            </h2>
+            <div className="seg">
+              {PRESETS.map(([p, label]) => (
+                <button key={p} className={statPreset === p ? 'on' : ''} onClick={() => setStatPreset(p)}>{label}</button>
+              ))}
+            </div>
+            {statPreset === 'custom' && (
+              <div className="row2">
+                <label className="field">開始月
+                  <input type="month" value={statFrom || earliestMonth} onChange={(e) => setStatFrom(e.target.value)} /></label>
+                <label className="field">終了月
+                  <input type="month" value={statTo || month} onChange={(e) => setStatTo(e.target.value)} /></label>
+              </div>
+            )}
+            <p className="muted" style={{ fontSize: 12, margin: '0 0 6px' }}>{statFromR} 〜 {statToR}</p>
+            {stats.length === 0 ? (
+              <p className="muted" style={{ fontSize: 13 }}>この期間に変動費の記録がありません</p>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ fontSize: 12, borderCollapse: 'collapse', whiteSpace: 'nowrap', width: '100%' }}>
+                  <thead>
+                    <tr className="muted">
+                      <th style={{ padding: 4, textAlign: 'left' }}>カテゴリ</th>
+                      <th style={{ padding: 4, textAlign: 'right' }}>合計</th>
+                      <th style={{ padding: 4, textAlign: 'right' }}>平均</th>
+                      <th style={{ padding: 4, textAlign: 'right' }}>最大</th>
+                      <th style={{ padding: 4, textAlign: 'right' }}>最小</th>
+                      <th style={{ padding: 4, textAlign: 'right' }}>月数</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stats.map((s) => (
+                      <tr key={s.category} style={{ borderTop: '1px solid var(--border)' }}>
+                        <td style={{ padding: 4 }}>{s.category}</td>
+                        <td style={{ padding: 4, textAlign: 'right' }}>{yen(s.total)}</td>
+                        <td style={{ padding: 4, textAlign: 'right' }}>{yen(s.avg)}</td>
+                        <td style={{ padding: 4, textAlign: 'right' }}>{yen(s.max)}</td>
+                        <td style={{ padding: 4, textAlign: 'right' }}>{yen(s.min)}</td>
+                        <td style={{ padding: 4, textAlign: 'right' }}>{s.count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
           </>
         )}

@@ -157,13 +157,8 @@ export default function HomeGraphs({ data }: { data: AllData }) {
     return m
   }, [data])
 
-  // ---- 時点スナップショット（期間ピッカーの影響を受けない） ----
-  const curIncome = incMap.get(month) ?? 0
-  const curVariable = expMap.get(month) ?? 0
-  const curFixed = fixedOf(month)
-  const curBalance = curIncome - curVariable - curFixed
+  // 現時点の負債合計（純資産の推移を出すかの判定に使う。期間ピッカーの影響を受けない）
   const liabilityTotal = totalLiabilitiesAt(liabilities, month)
-  const netWorthNow = (latest ? assetTotal(latest) : 0) - liabilityTotal
 
   // 期間集計（cfP に追従）
   const sum = useMemo(() => periodSummary(data, cfP.from, cfP.to, principalCap), [data, cfP.from, cfP.to, principalCap])
@@ -286,9 +281,15 @@ export default function HomeGraphs({ data }: { data: AllData }) {
           </div>
         )}
 
-        {(liabilities.length > 0 || totalLiabilitiesAt(liabilities, month) > 0) && netWorthSeries.length >= 2 && (
+        {(liabilities.length > 0 || liabilityTotal > 0) && netWorthSeries.length >= 2 && (
           <div className="card">
-            <h2>純資産の推移</h2>
+            <h2>
+              純資産の推移
+              <HelpTip title="純資産の計算">
+                純資産 = 資産合計 − 負債合計。負債は「資産」タブで登録でき、ローンは元利均等の返済スケジュールから
+                各時点の残高を自動計算します（実測を入れた場合はそちらを優先）。
+              </HelpTip>
+            </h2>
             <div className="chart-box small">
               <Line
                 data={{
@@ -333,35 +334,6 @@ export default function HomeGraphs({ data }: { data: AllData }) {
       {/* ===================== 収支 ===================== */}
       <details open className="graph-section">
         <summary>💰 収支のグラフ</summary>
-
-        {(liabilities.length > 0 || liabilityTotal > 0) && (
-          <div className="card">
-            <h2>
-              純資産（バランスシート）
-              <HelpTip title="純資産の計算">
-                純資産 = 資産合計 − 負債合計。負債は「資産」タブで登録でき、ローンは元利均等の返済スケジュールから
-                各時点の残高を自動計算します（実測を入れた場合はそちらを優先）。推移グラフは「資産のグラフ」内にあります。
-              </HelpTip>
-            </h2>
-            <div className="kv"><span className="muted">資産合計</span><span>{yen(latest ? assetTotal(latest) : 0)}</span></div>
-            <div className="kv"><span className="muted">負債合計</span><span className="neg">−{yen(liabilityTotal)}</span></div>
-            <div className="kv" style={{ borderTop: '1px solid var(--border)', marginTop: 4, paddingTop: 8 }}>
-              <span>純資産</span>
-              <b className={netWorthNow >= 0 ? 'pos' : 'neg'}>{yen(netWorthNow)}</b>
-            </div>
-          </div>
-        )}
-
-        <div className="card">
-          <h2>今月の収支（{month}）</h2>
-          <div className="kv"><span className="muted">収入</span><span>{yen(curIncome)}</span></div>
-          <div className="kv"><span className="muted">変動費</span><span>{yen(curVariable)}</span></div>
-          <div className="kv"><span className="muted">固定費（月割り）</span><span>{yen(curFixed)}</span></div>
-          <div className="kv" style={{ borderTop: '1px solid var(--border)', marginTop: 4, paddingTop: 8 }}>
-            <span>収支</span>
-            <span className={curBalance >= 0 ? 'pos' : 'neg'}>{curBalance >= 0 ? '+' : ''}{yen(curBalance)}</span>
-          </div>
-        </div>
 
         <PeriodPicker period={cfP} note="下の収支の集計・グラフ共通" />
 

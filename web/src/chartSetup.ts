@@ -45,10 +45,19 @@ Chart.defaults.font.family =
 Chart.defaults.plugins.tooltip.callbacks = {
   ...Chart.defaults.plugins.tooltip.callbacks,
   label: (ctx) => {
-    const name = ctx.dataset.label ?? ''
+    // 系列名。ドーナツはデータセットに label が無いので、セグメント名（ctx.label）を使う
+    const name = ctx.dataset.label ?? ctx.label ?? ''
     if (isMasked()) return `${name}: ＊＊＊`
     const raw = ctx.parsed as unknown
-    const v = typeof raw === 'object' && raw !== null ? (raw as { y: number }).y : (raw as number)
+    let v: number
+    if (typeof raw === 'object' && raw !== null) {
+      // parsed は軸名でキーされる（値=vScale側・カテゴリのindex=iScale側）。
+      // 縦棒/折れ線は値がy、横棒(indexAxis:'y')は値がx なので、値スケールの軸を見て取り出す。
+      const vAxis = ctx.chart.getDatasetMeta(ctx.datasetIndex)?.vScale?.axis === 'x' ? 'x' : 'y'
+      v = (raw as Record<string, number>)[vAxis]
+    } else {
+      v = raw as number
+    }
     return `${name}: ${Number(v).toLocaleString('ja-JP')}円`
   },
 }

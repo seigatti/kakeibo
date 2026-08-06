@@ -76,7 +76,8 @@ export default function LoanTotalsCard({ liabilities }: { liabilities: Liability
           options={{
             indexAxis: 'y' as const,
             maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
+            // 横棒なので判定軸も y にする（既定の x のままだとタップした行が無視される）
+            interaction: { mode: 'index', intersect: false, axis: 'y' },
             scales: { x: { stacked: true, ticks: { callback: (v) => yenShort(Number(v)) } }, y: { stacked: true } },
             plugins: { datalabels: { display: false } },
           }}

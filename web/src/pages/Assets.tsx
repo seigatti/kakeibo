@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Bar, Line } from 'react-chartjs-2'
 import HelpTip from '../components/HelpTip'
+import LoanTotalsCard from '../components/LoanTotalsCard'
 import PeriodPicker, { inRange, usePeriod } from '../components/PeriodPicker'
 import { useStore } from '../store'
 import { assetTotal, sortedAssets, thisMonth, today, yen, yenShort } from '../utils'
@@ -211,6 +212,8 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
       )}
 
       <LiabilityCard />
+
+      <LoanTotalsCard liabilities={data?.liabilities ?? []} />
 
       {assets.length > 0 && (
         <div className="card">

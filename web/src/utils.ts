@@ -135,6 +135,45 @@ export function totalLiabilitiesAt(liabilities: LiabilityRow[], month: string, c
   return liabilities.reduce((s, l) => s + liabilityBalanceAt(l, month, currentMonth), 0)
 }
 
+export interface LoanTotals {
+  principal: number // 当初借入額（元金）
+  monthly: number // 毎月返済額（元利均等）
+  total: number // 総支払額 = 毎月返済額 × 返済回数
+  interest: number // 利息総額 = 総支払額 − 元金
+  months: number // 返済回数（月）
+  paidMonths: number // 経過済みの返済回数
+  paid: number // これまでの支払額
+  remaining: number // 残りの支払額
+  endMonth: string | null // 完済予定月（開始月が未入力なら null）
+}
+
+/**
+ * ローンの生涯支払額（元利均等・固定金利）。当初借入額に対して最終的にいくら払うかを示す。
+ * ローン以外・必要項目が未入力の場合は null。
+ * ※繰上返済（現在残高の実測）は当初スケジュール前提のこの試算には反映しない。
+ */
+export function loanTotals(l: LiabilityRow, currentMonth: string = thisMonth()): LoanTotals | null {
+  if (l.kind !== 'ローン') return null
+  const principal = l.principal ?? 0
+  const years = l.years ?? 0
+  if (principal <= 0 || years <= 0) return null
+  const months = Math.round(years * 12)
+  const monthly = annualLoanPayment(principal, l.rate ?? 0, years) / 12
+  const total = monthly * months
+  const paidMonths = l.start_month ? Math.min(months, Math.max(0, monthDiff(l.start_month, currentMonth))) : 0
+  return {
+    principal,
+    monthly,
+    total,
+    interest: total - principal,
+    months,
+    paidMonths,
+    paid: monthly * paidMonths,
+    remaining: monthly * (months - paidMonths),
+    endMonth: l.start_month ? addMonths(l.start_month, months - 1) : null,
+  }
+}
+
 export interface NetWorthPoint {
   month: string
   assets: number

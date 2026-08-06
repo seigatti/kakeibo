@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { Bar, Chart, Doughnut, Line } from 'react-chartjs-2'
 import HelpTip from '../components/HelpTip'
+import LoanTotalsCard from '../components/LoanTotalsCard'
 import PeriodPicker, { inRange, usePeriod } from '../components/PeriodPicker'
 import { CONSUMPTION_UNITS, type AllData } from '../types'
 import {
@@ -305,6 +306,8 @@ export default function HomeGraphs({ data }: { data: AllData }) {
             </div>
           </div>
         )}
+
+        <LoanTotalsCard liabilities={liabilities} />
 
         {profits.length >= 2 && (
           <div className="card">

@@ -53,7 +53,7 @@ export function usePeriod(earliest: string): Period {
 export default function PeriodPicker({ period, note }: { period: Period; note?: string }) {
   const { preset, setPreset, cf, setCf, ct, setCt, from, to, earliest } = period
   return (
-    <div className="card">
+    <div className="card period-picker">
       <div className="seg">
         {PRESETS.map(([p, label]) => (
           <button key={p} className={preset === p ? 'on' : ''} onClick={() => setPreset(p)}>{label}</button>

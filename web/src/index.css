@@ -9,6 +9,8 @@
   --red: #f87171;
   --amber: #fbbf24;
   --border: rgba(148, 163, 184, 0.2);
+  /* ヘッダーの高さ（App.tsx が実測値で上書き。ここはフォールバック） */
+  --header-h: 55px;
 }
 
 * {
@@ -356,6 +358,16 @@ button {
 .icon-btn.on {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* 表示期間バー: スクロールするとヘッダー直下に貼り付いて追従する。
+   position:sticky は親要素の箱の中でだけ効くので、ホームでは各セクション
+   （details.graph-section）の中だけで追従し、次のセクションのバーに入れ替わる。 */
+.period-picker {
+  position: sticky;
+  top: var(--header-h);
+  z-index: 5; /* カード(auto)より上・ヘッダー/タブバー(10)より下 */
+  box-shadow: 0 6px 12px -6px rgba(0, 0, 0, 0.6);
 }
 
 /* ホームのグラフ折りたたみセクション */

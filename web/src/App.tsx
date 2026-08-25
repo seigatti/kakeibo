@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from './store'
 import MemoWindow from './MemoWindow'
 import { setConstantOverrides } from './constants'
@@ -58,12 +58,25 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
+  // ヘッダーの実高さを CSS 変数へ。表示期間バーの sticky(top) がこれを参照する
+  // （高さは env(safe-area-inset-top) を含むので CSS だけでは正確に出せない）
+  const headerRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const el = headerRef.current
+    if (!el) return
+    const apply = () => document.documentElement.style.setProperty('--header-h', `${el.offsetHeight}px`)
+    apply()
+    const ro = new ResizeObserver(apply)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
   // 未設定なら設定画面へ誘導
   const tab: TabId = config ? route.tab : 'settings'
 
   return (
     <div className={masked ? 'app masked' : 'app'}>
-      <header className="header">
+      <header className="header" ref={headerRef}>
         <h1>家計簿</h1>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className={masked ? 'icon-btn on' : 'icon-btn'} onClick={toggleMask}

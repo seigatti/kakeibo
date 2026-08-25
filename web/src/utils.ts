@@ -79,6 +79,35 @@ export const assetTotal = (a: AssetRow) => (a.investment ?? 0) + (a.cash ?? 0) +
 
 export const sortedAssets = (assets: AssetRow[]) => [...assets].sort((x, y) => x.date.localeCompare(y.date))
 
+/** 資産のうち、金額として増減を見る項目 */
+export type AssetItemKey = 'investment' | 'cash' | 'pension'
+
+/**
+ * 最新の資産記録における項目ごとの前回比。
+ * 記録は部分的なことがある（Zaimのみ＝現金だけ / MFのみ＝投資・年金だけ）ため、
+ * 単純に1つ前のレコードと引くと前回が null の項目で増減が過大になる。
+ * そこで項目ごとに「直近でその項目が記録されている値」まで遡って差を取る。
+ * 最新レコードでその項目が null（＝表示は「−」）の場合や、比較対象が無い場合は null。
+ */
+export function assetItemDiffs(assets: AssetRow[]): Record<AssetItemKey, number | null> {
+  const out: Record<AssetItemKey, number | null> = { investment: null, cash: null, pension: null }
+  const sorted = sortedAssets(assets)
+  const newest = sorted[sorted.length - 1]
+  if (!newest) return out
+  for (const key of ['investment', 'cash', 'pension'] as AssetItemKey[]) {
+    const cur = newest[key]
+    if (cur === null) continue
+    for (let i = sorted.length - 2; i >= 0; i--) {
+      const v = sorted[i][key]
+      if (v !== null) {
+        out[key] = cur - v
+        break
+      }
+    }
+  }
+  return out
+}
+
 /** 月ごとの変動費合計 */
 export function expenseByMonth(expenses: ExpenseRow[]): Map<string, number> {
   const map = new Map<string, number>()

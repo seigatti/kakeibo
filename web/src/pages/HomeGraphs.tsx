@@ -6,6 +6,7 @@ import PeriodPicker, { inRange, usePeriod } from '../components/PeriodPicker'
 import { CONSUMPTION_UNITS, type AllData } from '../types'
 import {
   assetAllocationTrend,
+  assetItemDiffs,
   assetTotal,
   categoryStats,
   DEFAULT_PRINCIPAL_CAP,
@@ -63,6 +64,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
   const assets = useMemo(() => sortedAssets(data.assets), [data])
   const latest = assets[assets.length - 1]
   const prev = assets[assets.length - 2]
+  const itemDiffs = useMemo(() => assetItemDiffs(data.assets), [data])
   const liabilities = data.liabilities ?? []
 
   // ---- 各セクションのデータ最古月（期間ピッカーの「全期間」起点） ----
@@ -187,7 +189,14 @@ export default function HomeGraphs({ data }: { data: AllData }) {
         <summary>📈 資産のグラフ</summary>
 
         <div className="card">
-          <h2>総資産{latest ? `（${latest.date}時点）` : ''}</h2>
+          <h2>
+            総資産{latest ? `（${latest.date}時点）` : ''}
+            <HelpTip title="前回比について">
+              合計の「前回比」は1つ前の記録との差です。
+              <br />投資・現金・年金それぞれの増減は、<b>その項目が記録されている直近の記録</b>との差で出しています。
+              <br />（現金だけ・投資だけを記録した日があっても増減がズレないようにするため）
+            </HelpTip>
+          </h2>
           {latest ? (
             <>
               <div className="big">{yen(assetTotal(latest))}</div>
@@ -198,9 +207,21 @@ export default function HomeGraphs({ data }: { data: AllData }) {
                 </div>
               )}
               <div style={{ marginTop: 8 }}>
-                <div className="kv"><span className="muted">投資（マネフォ）</span><span>{yen(latest.investment)}</span></div>
-                <div className="kv"><span className="muted">現金（Zaim）</span><span>{yen(latest.cash)}</span></div>
-                <div className="kv"><span className="muted">年金</span><span>{yen(latest.pension)}</span></div>
+                {([['投資（マネフォ）', latest.investment, itemDiffs.investment],
+                   ['現金（Zaim）', latest.cash, itemDiffs.cash],
+                   ['年金', latest.pension, itemDiffs.pension]] as [string, number | null, number | null][]).map(([label, value, d]) => (
+                  <div className="kv" key={label}>
+                    <span className="muted">{label}</span>
+                    <span>
+                      {yen(value)}
+                      {d !== null && (
+                        <span className={d >= 0 ? 'pos' : 'neg'} style={{ fontSize: 11, marginLeft: 6 }}>
+                          {d >= 0 ? '+' : ''}{yen(d)}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                ))}
                 {latest.mf_profit !== null && (
                   <div className="kv"><span className="muted">評価損益（累計）</span>
                     <span className={latest.mf_profit >= 0 ? 'pos' : 'neg'}>{yen(latest.mf_profit)}</span></div>

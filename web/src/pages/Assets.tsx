@@ -139,6 +139,8 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
         {msg && <p className="pos center" style={{ margin: '8px 0 0' }}>{msg}</p>}
       </div>
 
+      {/* 期間バーの sticky はこの div の中でだけ効く（下の負債・記録履歴までは追従させない） */}
+      <div>
       {assets.length >= 2 && <PeriodPicker period={period} note="下の資産グラフ共通" />}
 
       {filtered.length >= 2 && (
@@ -210,6 +212,8 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
           </div>
         </div>
       )}
+
+      </div>
 
       <LiabilityCard />
 

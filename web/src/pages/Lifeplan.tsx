@@ -10,11 +10,13 @@ import {
   estimateIncome,
   estimatePension,
   parseLifeplan,
+  scenarioSummary,
   simulate,
   type LifeplanAdult,
   type LifeplanChild,
   type LifeplanConfig,
 } from '../lifeplan'
+import ScenarioSurveyCard from './ScenarioSurveyCard'
 import { useStore } from '../store'
 import { DEFAULT_PERSONS } from '../types'
 import { amt, assetTotal, estimateLivingCost, parseBonusConfig, sortedAssets, yen, yenShort } from '../utils'
@@ -31,36 +33,6 @@ const NEW_CHILD: LifeplanChild = {
 }
 
 const numOrNull = (s: string) => (s.trim() === '' ? null : Number(s.replace(/[,，]/g, '')) || 0)
-
-/** シナリオの主要条件を短い行の配列に整形（読み込まずに中身を把握するためのプレビュー） */
-function scenarioSummary(cfg: LifeplanConfig): string[] {
-  const lines: string[] = []
-  lines.push(`インフレ ${cfg.inflation}% / 利回り ${cfg.invest_return}% / 昇給 ${cfg.raise_rate}% / 年金上昇 ${cfg.pension_growth ?? 0}%`)
-  lines.push(`基本生活費: ${cfg.living_cost === null ? '実績から自動' : yen(cfg.living_cost)}（子供費用倍率 ${cfg.child_multiplier}）`)
-  if (cfg.adults.length) {
-    lines.push(
-      '大人: ' +
-        cfg.adults
-          .map((a) => `${a.name}${a.income_enabled ? '' : '(収入なし)'}${a.birth_year ? `・${a.birth_year}生` : ''}`)
-          .join(' / '),
-    )
-  }
-  if (cfg.children.length) {
-    lines.push(
-      `子供${cfg.children.length}人: ` +
-        cfg.children
-          .map((c) => `${c.birth_year}生・${c.path}${c.path !== '高卒' ? `(${c.college})` : ''}`)
-          .join(' / '),
-    )
-  }
-  if (cfg.home?.enabled) {
-    lines.push(`マイホーム: ${cfg.home.buy_year}年に${yen(cfg.home.price)}（頭金${yen(cfg.home.down_payment)}・${cfg.home.interest_rate}%・${cfg.home.loan_years}年）`)
-  }
-  if (cfg.custom_flows.length) {
-    lines.push('カスタム収支: ' + cfg.custom_flows.map((f) => f.label || '（無名）').join('、'))
-  }
-  return lines
-}
 
 /** 小数を途中入力できる数値欄（「0.」「1.5」などの入力中も値が消えない） */
 function DecimalField({ label, value, onChange, help }: { label: string; value: number; onChange: (v: number) => void; help?: ReactNode }) {
@@ -93,7 +65,8 @@ export default function Lifeplan() {
   const [cfg, setCfg] = useState<LifeplanConfig | null>(null)
   const [msg, setMsg] = useState('')
   const [scenarioName, setScenarioName] = useState('')
-  const [compareName, setCompareName] = useState('')
+  const [planA, setPlanA] = useState('')  // '' = 現在の設定
+  const [planB, setPlanB] = useState('')  // '' = 比較しない
   const [renaming, setRenaming] = useState<{ from: string; to: string } | null>(null)
 
   const persons = useMemo(() => {
@@ -197,12 +170,19 @@ export default function Lifeplan() {
   }, [data])
 
   // 比較対象のシミュレーション（同じ開始資産・収入前提で設定差だけを比較）
-  const compareResult = useMemo(() => {
-    const sc = scenarios.find((s) => s.name === compareName)
-    if (!sc) return null
-    const c = parseLifeplan(JSON.stringify(sc.config))
-    return simulate(c, startInvest, startLiquid, thisYear, resolvedNet, resolvedPension, c.living_cost ?? resolvedLiving)
-  }, [scenarios, compareName, startInvest, startLiquid, resolvedNet, resolvedPension, resolvedLiving])
+  // 保存シナリオを同じ開始資産・収入前提でシミュレート（設定差だけが結果差になる）
+  const simScenario = useMemo(
+    () => (name: string) => {
+      const sc = scenarios.find((x) => x.name === name)
+      if (!sc) return null
+      const c = parseLifeplan(JSON.stringify(sc.config))
+      return simulate(c, startInvest, startLiquid, thisYear, resolvedNet, resolvedPension, c.living_cost ?? resolvedLiving)
+    },
+    [scenarios, startInvest, startLiquid, resolvedNet, resolvedPension, resolvedLiving],
+  )
+  // A: 既定は「現在の設定」。保存シナリオを選ぶとそちらを表示する
+  const resultA = useMemo(() => (planA ? simScenario(planA) : result), [planA, simScenario, result])
+  const resultB = useMemo(() => (planB ? simScenario(planB) : null), [planB, simScenario])
 
   if (!cfg || !result) return <p className="muted center">読み込み中…</p>
 
@@ -252,7 +232,8 @@ export default function Lifeplan() {
   const deleteScenario = async (name: string) => {
     if (!window.confirm(`シナリオ「${name}」を削除しますか？`)) return
     await persistScenarios(scenarios.filter((s) => s.name !== name))
-    if (compareName === name) setCompareName('')
+    if (planA === name) setPlanA('')
+    if (planB === name) setPlanB('')
   }
 
   // 名称のみ変更（config は不変）
@@ -268,7 +249,8 @@ export default function Lifeplan() {
       return
     }
     await persistScenarios(scenarios.map((s) => (s.name === renaming.from ? { ...s, name: to } : s)))
-    if (compareName === renaming.from) setCompareName(to)
+    if (planA === renaming.from) setPlanA(to)
+    if (planB === renaming.from) setPlanB(to)
     setRenaming(null)
   }
 
@@ -281,8 +263,21 @@ export default function Lifeplan() {
     await persistScenarios(next)
   }
 
-  const last = result.rows[result.rows.length - 1]
-  const compareLast = compareResult?.rows[compareResult.rows.length - 1]
+  // グラフ・サマリは A を表示する（A 未選択なら「現在の設定」）
+  const CURRENT = '現在の設定'
+  const rA = resultA ?? result
+  const nameA = planA || CURRENT
+  const nameB = planB
+  const lastA = rA.rows[rA.rows.length - 1]
+  const lastB = resultB?.rows[resultB.rows.length - 1]
+  const A_COLOR = '#38bdf8'
+  const B_COLOR = '#fbbf24'
+  const Chip = ({ color, dashed, text }: { color: string; dashed?: boolean; text: string }) => (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, marginRight: 12 }}>
+      <span style={{ width: 18, height: 0, borderTop: `3px ${dashed ? 'dashed' : 'solid'} ${color}` }} />
+      <span style={{ color }}>{text}</span>
+    </span>
+  )
 
   return (
     <>
@@ -302,11 +297,18 @@ export default function Lifeplan() {
         </div>
         {scenarios.length > 0 ? (
           <>
-            <label className="field">比較するシナリオ
-              <select value={compareName} onChange={(e) => setCompareName(e.target.value)}>
-                <option value="">（比較しない）</option>
-                {scenarios.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}
-              </select></label>
+            <div className="row2">
+              <label className="field">A（青の実線）
+                <select value={planA} onChange={(e) => setPlanA(e.target.value)}>
+                  <option value="">{CURRENT}</option>
+                  {scenarios.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}
+                </select></label>
+              <label className="field">B（黄の破線）
+                <select value={planB} onChange={(e) => setPlanB(e.target.value)}>
+                  <option value="">（比較しない）</option>
+                  {scenarios.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}
+                </select></label>
+            </div>
             <ul className="list">
               {scenarios.map((s, i) => (
                 <li key={s.name} style={{ flexWrap: 'wrap', rowGap: 4 }}>
@@ -335,24 +337,24 @@ export default function Lifeplan() {
                 </li>
               ))}
             </ul>
-            {compareResult && compareLast && (
+            {resultB && lastB && (
               <div style={{ marginTop: 8 }}>
                 <div className="kv">
-                  <span className="muted">80年後の資産（現在の設定）</span><span>{yen(last.assetsNominal)}</span>
+                  <span className="muted">80年後の資産（A: {nameA}）</span><span style={{ color: A_COLOR }}>{yen(lastA.assetsNominal)}</span>
                 </div>
                 <div className="kv">
-                  <span className="muted">80年後の資産（{compareName}）</span><span style={{ color: '#fbbf24' }}>{yen(compareLast.assetsNominal)}</span>
+                  <span className="muted">80年後の資産（B: {nameB}）</span><span style={{ color: B_COLOR }}>{yen(lastB.assetsNominal)}</span>
                 </div>
                 <div className="kv" style={{ borderTop: '1px solid var(--border)', paddingTop: 6 }}>
-                  <span>差（比較 − 現在）</span>
-                  <b className={compareLast.assetsNominal - last.assetsNominal >= 0 ? 'pos' : 'neg'}>
-                    {compareLast.assetsNominal - last.assetsNominal >= 0 ? '+' : ''}{yen(compareLast.assetsNominal - last.assetsNominal)}
+                  <span>差（B − A）</span>
+                  <b className={lastB.assetsNominal - lastA.assetsNominal >= 0 ? 'pos' : 'neg'}>
+                    {lastB.assetsNominal - lastA.assetsNominal >= 0 ? '+' : ''}{yen(lastB.assetsNominal - lastA.assetsNominal)}
                   </b>
                 </div>
                 <div className="kv">
                   <span className="muted">資産が尽きる年</span>
                   <span>
-                    現在: {result.depletionYear ?? 'なし'} / {compareName}: {compareResult.depletionYear ?? 'なし'}
+                    A: {rA.depletionYear ?? 'なし'} / B: {resultB.depletionYear ?? 'なし'}
                   </span>
                 </div>
               </div>
@@ -365,24 +367,50 @@ export default function Lifeplan() {
         )}
       </div>
 
+      <ScenarioSurveyCard
+        base={cfg}
+        saving={saving}
+        onSave={async (name, generated) => {
+          const exists = scenarios.some((x) => x.name === name)
+          const next = exists
+            ? scenarios.map((x) => (x.name === name ? { name, config: generated } : x))
+            : [...scenarios, { name, config: generated }]
+          await persistScenarios(next)
+        }}
+        onApply={(generated) => { setCfg(generated); setMsg('アンケートの内容を現在の設定に反映しました（「設定を保存」で確定）') }}
+      />
+
       <div className="card">
         <h2>
-          総資産の推移（{thisYear}〜{thisYear + 80}年）{head?.birth_year ? ' ※横軸カッコ内は' + head.name + 'の年齢' : ''}
+          総資産の推移: {nameA}{nameB ? ` vs ${nameB}` : ''}（{thisYear}〜{thisYear + 80}年）
           <HelpTip title="総資産の計算">
             毎年: 投資分 ×= (1＋運用利回り)、現金分 += 収入 − 支出。資産合計 = 投資分＋現金分。収入=給与・年金・カスタム収入・住宅ローン控除、支出=基本生活費＋子供費用＋カスタム支出＋住宅（毎年インフレ率分増加、住宅は実額）。<br />
             実質資産 = 名目資産 ÷ (1＋インフレ率)^経過年（今の価値に換算した「目減り後」の額）。<br />
             名目資産が減らない場合は運用益が収支の赤字を上回っています（運用利回り0で収支のみの推移を確認可）。
           </HelpTip>
         </h2>
+        <div style={{ marginBottom: 6 }}>
+          <Chip color={A_COLOR} text={`A: ${nameA}`} />
+          {nameB
+            ? <Chip color={B_COLOR} dashed text={`B: ${nameB}`} />
+            : <Chip color="#c084fc" dashed text="実質資産（今の価値）" />}
+          {head?.birth_year && <span className="muted" style={{ fontSize: 11 }}>※横軸カッコ内は{head.name}の年齢</span>}
+        </div>
+        {planA && (
+          <p className="muted" style={{ fontSize: 12, margin: '0 0 8px', color: 'var(--amber)' }}>
+            ⚠ グラフはシナリオ「{planA}」を表示中です。下の設定フォームは「{CURRENT}」の編集で、このグラフには反映されません。
+            <button className="linklike" style={{ marginLeft: 6, fontSize: 12 }} onClick={() => setPlanA('')}>現在の設定に戻す</button>
+          </p>
+        )}
         <div className="chart-box">
           <Line
             data={{
               labels,
               datasets: [
-                { label: '名目資産', data: result.rows.map((r) => r.assetsNominal), borderColor: '#38bdf8', tension: 0.2, pointRadius: 0 },
-                ...(compareResult
-                  ? [{ label: `比較: ${compareName}`, data: compareResult.rows.map((r) => r.assetsNominal), borderColor: '#fbbf24', borderDash: [8, 4], tension: 0.2, pointRadius: 0 }]
-                  : [{ label: '実質資産（今の価値）', data: result.rows.map((r) => r.assetsReal), borderColor: '#c084fc', borderDash: [6, 4], tension: 0.2, pointRadius: 0 }]),
+                { label: `A: ${nameA}`, data: rA.rows.map((r) => r.assetsNominal), borderColor: A_COLOR, tension: 0.2, pointRadius: 0 },
+                ...(resultB
+                  ? [{ label: `B: ${nameB}`, data: resultB.rows.map((r) => r.assetsNominal), borderColor: B_COLOR, borderDash: [8, 4], tension: 0.2, pointRadius: 0 }]
+                  : [{ label: '実質資産（今の価値）', data: rA.rows.map((r) => r.assetsReal), borderColor: '#c084fc', borderDash: [6, 4], tension: 0.2, pointRadius: 0 }]),
               ],
             }}
             options={{
@@ -392,12 +420,12 @@ export default function Lifeplan() {
             }}
           />
         </div>
-        {result.depletionYear !== null ? (
+        {rA.depletionYear !== null ? (
           <p className="neg" style={{ fontSize: 13, margin: '6px 0 0' }}>
-            ⚠ このままだと {result.depletionYear}年（{head?.birth_year ? `${head.name} ${result.depletionYear - head.birth_year}歳` : ''}）に資産がマイナスになります
+            ⚠ {nameA}: このままだと {rA.depletionYear}年（{head?.birth_year ? `${head.name} ${rA.depletionYear - head.birth_year}歳` : ''}）に資産がマイナスになります
           </p>
         ) : (
-          <p className="pos" style={{ fontSize: 13, margin: '6px 0 0' }}>✓ 80年後まで資産はマイナスになりません</p>
+          <p className="pos" style={{ fontSize: 13, margin: '6px 0 0' }}>✓ {nameA}: 80年後まで資産はマイナスになりません</p>
         )}
         <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>
           実質資産 = インフレ率{cfg.inflation}%で今の価値に換算した額（計算式は見出しの「？」参照）
@@ -406,7 +434,7 @@ export default function Lifeplan() {
 
       <div className="card">
         <h2>
-          年間の収入と支出（名目）
+          年間の収入と支出（名目）: {nameA}
           <HelpTip title="このグラフの構成">
             上向きバー = 収入（緑=給与、青緑=年金）。下向きバー = 支出（基本生活費＋子供費用＋カスタム支出）。黄線 = 支出のうち子供費用（児童手当差引後）。
           </HelpTip>
@@ -417,10 +445,10 @@ export default function Lifeplan() {
             data={{
               labels,
               datasets: [
-                { type: 'bar' as const, label: '給与', data: result.rows.map((r) => r.salary), backgroundColor: '#4ade80', stack: 'income' },
-                { type: 'bar' as const, label: '年金', data: result.rows.map((r) => r.pension), backgroundColor: '#2dd4bf', stack: 'income' },
-                { type: 'bar' as const, label: '支出', data: result.rows.map((r) => -r.expense), backgroundColor: '#f87171', stack: 'expense' },
-                { type: 'line' as const, label: 'うち子供費用', data: result.rows.map((r) => -r.childCost), borderColor: '#fbbf24', pointRadius: 0, tension: 0.2, stack: 'child' },
+                { type: 'bar' as const, label: '給与', data: rA.rows.map((r) => r.salary), backgroundColor: '#4ade80', stack: 'income' },
+                { type: 'bar' as const, label: '年金', data: rA.rows.map((r) => r.pension), backgroundColor: '#2dd4bf', stack: 'income' },
+                { type: 'bar' as const, label: '支出', data: rA.rows.map((r) => -r.expense), backgroundColor: '#f87171', stack: 'expense' },
+                { type: 'line' as const, label: 'うち子供費用', data: rA.rows.map((r) => -r.childCost), borderColor: '#fbbf24', pointRadius: 0, tension: 0.2, stack: 'child' },
               ],
             }}
             options={{
@@ -441,7 +469,12 @@ export default function Lifeplan() {
           <DecimalField label="実質インフレ率（%/年）" value={cfg.inflation} onChange={(v) => upd({ inflation: v })}
             help={<HelpTip title="インフレ率">支出（基本生活費・子供費用・カスタム支出）が毎年この率で増えます。例: 2%なら10年後の生活費は約1.22倍。「実質資産」の換算（名目資産÷(1+率)^経過年）にも使われます。小数入力可（例: 1.5）。</HelpTip>} />
           <DecimalField label="運用利回り（%/年）" value={cfg.invest_return} onChange={(v) => upd({ invest_return: v })}
-            help={<HelpTip title="運用利回り">投資分（開始時点の投資額）にのみ毎年この率で複利が効きます。現金・年金には効きません。毎年の収支の黒字は現金として積み上がります（追加投資は考慮しない簡易版）。0にすると収支の積み上げだけの推移になります。</HelpTip>} />
+            help={<HelpTip title="運用利回り">投資分に毎年この率で複利が効きます。現金・年金には効きません。下の「収入のうち投資へ回す割合」を0にすると、毎年の黒字は現金のまま積み上がります。0にすると収支の積み上げだけの推移になります。</HelpTip>} />
+        </div>
+        <div className="row2">
+          <DecimalField label="収入のうち投資へ回す割合（%）" value={cfg.invest_ratio ?? 0} onChange={(v) => upd({ invest_ratio: v })}
+            help={<HelpTip title="投資へ回す割合">毎年の収入（給与・年金など）のうち、この割合だけを現金から投資分へ振り替えます（積立のイメージ）。振り替えた分には運用利回りの複利が効きます。<br />手元の現金の範囲内でしか振り替えないので、資産の合計が増えたり減ったりすることはありません（配分が変わるだけ）。<br />0にすると従来どおり黒字は全額現金に積み上がります。</HelpTip>} />
+          <div />
         </div>
         <div className="row2">
           <DecimalField label="昇給率（%/年）" value={cfg.raise_rate} onChange={(v) => upd({ raise_rate: v })}
@@ -703,7 +736,7 @@ export default function Lifeplan() {
               </tr>
             </thead>
             <tbody>
-              {result.rows.filter((r) => r.i % 5 === 0).map((r) => (
+              {rA.rows.filter((r) => r.i % 5 === 0).map((r) => (
                 <tr key={r.year} style={{ borderTop: '1px solid var(--border)' }}>
                   <td style={{ padding: 4 }}>{r.year}</td>
                   {r.ages.filter((a) => a.age !== null).map((a) => <td key={a.name} style={{ padding: 4, textAlign: 'right' }}>{a.age}歳</td>)}

@@ -7,7 +7,7 @@
  */
 import { getConst } from './constants.ts'
 import type { BonusConfig, FurusatoSalary } from './types.ts'
-import { annualLoanPayment, estimateSalary, loanBalance, type SalaryEstimate } from './utils.ts'
+import { annualLoanPayment, estimateSalary, loanBalance, yen, type SalaryEstimate } from './utils.ts'
 
 export interface LifeplanAdult {
   name: string
@@ -71,6 +71,7 @@ export const DEFAULT_HOME: HomePlan = {
 export interface LifeplanConfig {
   inflation: number // %（実質インフレ率）
   invest_return: number // %（運用利回り。投資分にのみ複利で適用）
+  invest_ratio: number // %（毎年の収入のうち投資へ回す割合。0=これまでどおり黒字は全額現金に積む）
   raise_rate: number // %（昇給率）
   pension_growth: number // %（年金の上昇率。0=受給額は現在の額のまま。物価連動にするならインフレ率と同値）
   living_cost: number | null // 基本生活費（年額・現在価格・子供費用を除く）。null=実支出から自動推定
@@ -85,6 +86,7 @@ export interface LifeplanConfig {
 export const DEFAULT_LIFEPLAN: LifeplanConfig = {
   inflation: 2.0,
   invest_return: 3.0,
+  invest_ratio: 0,
   raise_rate: 1.0,
   pension_growth: 0,
   living_cost: null,
@@ -111,6 +113,37 @@ export function parseLifeplan(json: string | null | undefined): LifeplanConfig {
   } catch {
     return DEFAULT_LIFEPLAN
   }
+}
+
+/** シナリオの主要条件を短い行の配列に整形（読み込まずに中身を把握するためのプレビュー） */
+export function scenarioSummary(cfg: LifeplanConfig): string[] {
+  const lines: string[] = []
+  lines.push(`インフレ ${cfg.inflation}% / 利回り ${cfg.invest_return}% / 昇給 ${cfg.raise_rate}% / 年金上昇 ${cfg.pension_growth ?? 0}%`)
+  lines.push(`収入のうち投資へ回す割合: ${cfg.invest_ratio ?? 0}%`)
+  lines.push(`基本生活費: ${cfg.living_cost === null ? '実績から自動' : yen(cfg.living_cost)}（子供費用倍率 ${cfg.child_multiplier}）`)
+  if (cfg.adults.length) {
+    lines.push(
+      '大人: ' +
+        cfg.adults
+          .map((a) => `${a.name}${a.income_enabled ? '' : '(収入なし)'}${a.birth_year ? `・${a.birth_year}生` : ''}`)
+          .join(' / '),
+    )
+  }
+  if (cfg.children.length) {
+    lines.push(
+      `子供${cfg.children.length}人: ` +
+        cfg.children
+          .map((c) => `${c.birth_year}生・${c.path}${c.path !== '高卒' ? `(${c.college})` : ''}`)
+          .join(' / '),
+    )
+  }
+  if (cfg.home?.enabled) {
+    lines.push(`マイホーム: ${cfg.home.buy_year}年に${yen(cfg.home.price)}（頭金${yen(cfg.home.down_payment)}・${cfg.home.interest_rate}%・${cfg.home.loan_years}年）`)
+  }
+  if (cfg.custom_flows.length) {
+    lines.push('カスタム収支: ' + cfg.custom_flows.map((f) => f.label || '（無名）').join('、'))
+  }
+  return lines
 }
 
 // ローン計算は utils.ts に実装（負債管理と共用）。既存の import パスを保つため再エクスポート
@@ -287,6 +320,10 @@ export function simulate(
     // 投資分は運用利回りで複利成長。年間収支の黒字/赤字は現金（liquid）で調整
     invest *= 1 + cfg.invest_return / 100
     liquid += income - expense
+    // 収入の一定割合を投資へ振り替える（手元現金の範囲内。総資産は変わらず配分だけが変わる）
+    const toInvest = Math.min(income * ((cfg.invest_ratio ?? 0) / 100), Math.max(0, liquid))
+    invest += toInvest
+    liquid -= toInvest
     const assets = invest + liquid
     if (assets < 0 && depletionYear === null) depletionYear = year
 

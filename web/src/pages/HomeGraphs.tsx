@@ -78,12 +78,11 @@ export default function HomeGraphs({ data }: { data: AllData }) {
     return ms.length ? ms.sort()[0] : month
   }, [data, month])
 
-  // ---- セクションごとの表示期間（既定=全期間） ----
-  const assetP = usePeriod(assetEarliest)
-  const cfP = usePeriod(cfEarliest)
-  const consP = usePeriod(consEarliest)
+  // ---- 表示期間（ホーム全体で1つ。既定=全期間） ----
+  const earliest = [assetEarliest, cfEarliest, consEarliest].sort()[0]
+  const period = usePeriod(earliest)
 
-  // ---- 資産（assetP に追従） ----
+  // ---- 資産（period に追従） ----
   const allocation = useMemo(() => {
     const items = [
       { label: '投資', value: latest?.investment ?? 0, color: '#4ade80' },
@@ -93,16 +92,16 @@ export default function HomeGraphs({ data }: { data: AllData }) {
     return { items, total: items.reduce((s, a) => s + a.value, 0) }
   }, [latest])
   const assetRecent = useMemo(
-    () => assets.filter((a) => inRange(a.date.slice(0, 7), assetP.from, assetP.to)),
-    [assets, assetP.from, assetP.to],
+    () => assets.filter((a) => inRange(a.date.slice(0, 7), period.from, period.to)),
+    [assets, period.from, period.to],
   )
   const allocTrend = useMemo(
-    () => assetAllocationTrend(data.assets).filter((p) => inRange(p.month, assetP.from, assetP.to)),
-    [data, assetP.from, assetP.to],
+    () => assetAllocationTrend(data.assets).filter((p) => inRange(p.month, period.from, period.to)),
+    [data, period.from, period.to],
   )
   const netWorthSeries = useMemo(
-    () => netWorthByMonth(data.assets, liabilities).filter((p) => inRange(p.month, assetP.from, assetP.to)),
-    [data, liabilities, assetP.from, assetP.to],
+    () => netWorthByMonth(data.assets, liabilities).filter((p) => inRange(p.month, period.from, period.to)),
+    [data, liabilities, period.from, period.to],
   )
   const profits = assetRecent.filter((a) => a.mf_profit !== null)
   const gains = useMemo(() => {
@@ -111,8 +110,8 @@ export default function HomeGraphs({ data }: { data: AllData }) {
     return [...byMonth.entries()].sort(([a], [b]) => a.localeCompare(b))
   }, [assetRecent])
 
-  // ---- 収支（cfP に追従） ----
-  const chartMonths = useMemo(() => monthRange(cfP.from, cfP.to), [cfP.from, cfP.to])
+  // ---- 収支（period に追従） ----
+  const chartMonths = useMemo(() => monthRange(period.from, period.to), [period.from, period.to])
   const incMap = useMemo(() => effectiveIncomeByMonth(data.furusato_salaries ?? []), [data])
   const expMap = useMemo(() => expenseByMonth(data.expenses), [data])
   const breakdown = useMemo(() => nonInvestBreakdownByMonth(data.assets, principalCap), [data, principalCap])
@@ -145,8 +144,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
   const composition = useMemo(() => expenseComposition(data, chartMonths, principalCap), [data, chartMonths, principalCap])
   const fixedBreakdown = useMemo(() => fixedCostBreakdown(data.fixed_costs, month), [data, month])
 
-  // ---- 消費量（consP に追従） ----
-  const consMonths = useMemo(() => monthRange(consP.from, consP.to), [consP.from, consP.to])
+  // ---- 消費量（period に追従） ----
   const consumptionCats = useMemo(() => {
     const has = new Set((data.consumption ?? []).filter((c) => c.quantity > 0).map((c) => c.category))
     return Object.keys(CONSUMPTION_UNITS).filter((c) => has.has(c))
@@ -163,8 +161,8 @@ export default function HomeGraphs({ data }: { data: AllData }) {
   // 現時点の負債合計（純資産の推移を出すかの判定に使う。期間ピッカーの影響を受けない）
   const liabilityTotal = totalLiabilitiesAt(liabilities, month)
 
-  // 期間集計（cfP に追従）
-  const sum = useMemo(() => periodSummary(data, cfP.from, cfP.to, principalCap), [data, cfP.from, cfP.to, principalCap])
+  // 期間集計（period に追従）
+  const sum = useMemo(() => periodSummary(data, period.from, period.to, principalCap), [data, period.from, period.to, principalCap])
   const cumulative = useMemo(() => {
     let cin = 0
     let cout = 0
@@ -184,80 +182,81 @@ export default function HomeGraphs({ data }: { data: AllData }) {
 
   return (
     <>
+      <div className="card">
+        <h2>
+          総資産{latest ? `（${latest.date}時点）` : ''}
+          <HelpTip title="前回比について">
+            合計の「前回比」は1つ前の記録との差です。
+            <br />投資・現金・年金それぞれの増減は、<b>その項目が記録されている直近の記録</b>との差で出しています。
+            <br />（現金だけ・投資だけを記録した日があっても増減がズレないようにするため）
+          </HelpTip>
+        </h2>
+        {latest ? (
+          <>
+            <div className="big">{yen(assetTotal(latest))}</div>
+            {prev && (
+              <div className={assetTotal(latest) - assetTotal(prev) >= 0 ? 'pos' : 'neg'}>
+                前回比 {assetTotal(latest) - assetTotal(prev) >= 0 ? '+' : ''}
+                {yen(assetTotal(latest) - assetTotal(prev))}
+              </div>
+            )}
+            <div style={{ marginTop: 8 }}>
+              {([['投資（マネフォ）', latest.investment, itemDiffs.investment],
+                 ['現金（Zaim）', latest.cash, itemDiffs.cash],
+                 ['年金', latest.pension, itemDiffs.pension]] as [string, number | null, number | null][]).map(([label, value, d]) => (
+                <div className="kv" key={label}>
+                  <span className="muted">{label}</span>
+                  <span>
+                    {yen(value)}
+                    {d !== null && (
+                      <span className={d >= 0 ? 'pos' : 'neg'} style={{ fontSize: 11, marginLeft: 6 }}>
+                        {d >= 0 ? '+' : ''}{yen(d)}
+                      </span>
+                    )}
+                  </span>
+                </div>
+              ))}
+              {latest.mf_profit !== null && (
+                <div className="kv"><span className="muted">評価損益（累計）</span>
+                  <span className={latest.mf_profit >= 0 ? 'pos' : 'neg'}>{yen(latest.mf_profit)}</span></div>
+              )}
+              {latest.monthly_gain !== null && (
+                <div className="kv"><span className="muted">今月の投資増減</span>
+                  <span className={latest.monthly_gain >= 0 ? 'pos' : 'neg'}>{latest.monthly_gain >= 0 ? '+' : ''}{yen(latest.monthly_gain)}</span></div>
+              )}
+            </div>
+          </>
+        ) : (
+          <p className="muted">まだ記録がありません。「資産」タブから記録してください。</p>
+        )}
+      </div>
+
+      {allocation.total > 0 && (
+        <div className="card">
+          <h2>資産配分（最新: {latest?.date}）</h2>
+          <div className="chart-box small">
+            <Doughnut
+              data={{ labels: allocation.items.map((a) => a.label), datasets: [{ data: allocation.items.map((a) => a.value), backgroundColor: allocation.items.map((a) => a.color), borderColor: 'transparent' }] }}
+              options={donutOpts(allocation.items)}
+            />
+          </div>
+          <div style={{ marginTop: 6 }}>
+            {allocation.items.map((a) => (
+              <div className="kv" key={a.label}>
+                <span className="muted"><span style={{ color: a.color }}>■</span> {a.label}（{Math.round((a.value / allocation.total) * 100)}%）</span>
+                <span>{yen(a.value)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 期間バーはここに1本だけ。親が .main なのでページ末尾まで追従する */}
+      <PeriodPicker period={period} note="ホームの全グラフ共通" />
+
       {/* ===================== 資産 ===================== */}
       <details open className="graph-section">
         <summary>📈 資産のグラフ</summary>
-
-        <div className="card">
-          <h2>
-            総資産{latest ? `（${latest.date}時点）` : ''}
-            <HelpTip title="前回比について">
-              合計の「前回比」は1つ前の記録との差です。
-              <br />投資・現金・年金それぞれの増減は、<b>その項目が記録されている直近の記録</b>との差で出しています。
-              <br />（現金だけ・投資だけを記録した日があっても増減がズレないようにするため）
-            </HelpTip>
-          </h2>
-          {latest ? (
-            <>
-              <div className="big">{yen(assetTotal(latest))}</div>
-              {prev && (
-                <div className={assetTotal(latest) - assetTotal(prev) >= 0 ? 'pos' : 'neg'}>
-                  前回比 {assetTotal(latest) - assetTotal(prev) >= 0 ? '+' : ''}
-                  {yen(assetTotal(latest) - assetTotal(prev))}
-                </div>
-              )}
-              <div style={{ marginTop: 8 }}>
-                {([['投資（マネフォ）', latest.investment, itemDiffs.investment],
-                   ['現金（Zaim）', latest.cash, itemDiffs.cash],
-                   ['年金', latest.pension, itemDiffs.pension]] as [string, number | null, number | null][]).map(([label, value, d]) => (
-                  <div className="kv" key={label}>
-                    <span className="muted">{label}</span>
-                    <span>
-                      {yen(value)}
-                      {d !== null && (
-                        <span className={d >= 0 ? 'pos' : 'neg'} style={{ fontSize: 11, marginLeft: 6 }}>
-                          {d >= 0 ? '+' : ''}{yen(d)}
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                ))}
-                {latest.mf_profit !== null && (
-                  <div className="kv"><span className="muted">評価損益（累計）</span>
-                    <span className={latest.mf_profit >= 0 ? 'pos' : 'neg'}>{yen(latest.mf_profit)}</span></div>
-                )}
-                {latest.monthly_gain !== null && (
-                  <div className="kv"><span className="muted">今月の投資増減</span>
-                    <span className={latest.monthly_gain >= 0 ? 'pos' : 'neg'}>{latest.monthly_gain >= 0 ? '+' : ''}{yen(latest.monthly_gain)}</span></div>
-                )}
-              </div>
-            </>
-          ) : (
-            <p className="muted">まだ記録がありません。「資産」タブから記録してください。</p>
-          )}
-        </div>
-
-        {allocation.total > 0 && (
-          <div className="card">
-            <h2>資産配分（最新: {latest?.date}）</h2>
-            <div className="chart-box small">
-              <Doughnut
-                data={{ labels: allocation.items.map((a) => a.label), datasets: [{ data: allocation.items.map((a) => a.value), backgroundColor: allocation.items.map((a) => a.color), borderColor: 'transparent' }] }}
-                options={donutOpts(allocation.items)}
-              />
-            </div>
-            <div style={{ marginTop: 6 }}>
-              {allocation.items.map((a) => (
-                <div className="kv" key={a.label}>
-                  <span className="muted"><span style={{ color: a.color }}>■</span> {a.label}（{Math.round((a.value / allocation.total) * 100)}%）</span>
-                  <span>{yen(a.value)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {assets.length >= 2 && <PeriodPicker period={assetP} note="下の資産グラフ共通" />}
 
         {assetRecent.length >= 2 && (
           <div className="card">
@@ -359,11 +358,9 @@ export default function HomeGraphs({ data }: { data: AllData }) {
       <details open className="graph-section">
         <summary>💰 収支のグラフ</summary>
 
-        <PeriodPicker period={cfP} note="下の収支の集計・グラフ共通" />
-
         <div className="card">
           <h2>
-            期間集計（{cfP.from} 〜 {cfP.to}・{sum.months.length}ヶ月）
+            期間集計（{period.from} 〜 {period.to}・{sum.months.length}ヶ月）
             <HelpTip title="期間集計の定義">
               ・収入合計: 各月の実効収入（給与明細の手取り＋その他収入）
               {'\n'}・固定費: 固定費タブの月割り額の合計
@@ -550,13 +547,11 @@ export default function HomeGraphs({ data }: { data: AllData }) {
         <details open className="graph-section">
           <summary>⚡ 消費量のグラフ</summary>
 
-          <PeriodPicker period={consP} note="下の消費量グラフ共通" />
-
           <div className="card">
             <h2>消費量の推移</h2>
             <div className="chart-box">
               <Line
-                data={{ labels: consMonths.map(lbl), datasets: consumptionCats.map((cat, i) => ({ label: `${cat}(${CONSUMPTION_UNITS[cat]})`, data: consMonths.map((m) => qtyByCat.get(cat)?.get(m) ?? null), borderColor: PALETTE[i % PALETTE.length], tension: 0.3 })) }}
+                data={{ labels: chartMonths.map(lbl), datasets: consumptionCats.map((cat, i) => ({ label: `${cat}(${CONSUMPTION_UNITS[cat]})`, data: chartMonths.map((m) => qtyByCat.get(cat)?.get(m) ?? null), borderColor: PALETTE[i % PALETTE.length], tension: 0.3 })) }}
                 options={{ maintainAspectRatio: false, spanGaps: true, interaction: { mode: 'index', intersect: false }, scales: { x: xTicks } }}
               />
             </div>
@@ -567,10 +562,10 @@ export default function HomeGraphs({ data }: { data: AllData }) {
             <div className="chart-box">
               <Line
                 data={{
-                  labels: consMonths.map(lbl),
+                  labels: chartMonths.map(lbl),
                   datasets: consumptionCats.map((cat, i) => ({
                     label: `${cat}(円/${CONSUMPTION_UNITS[cat]})`,
-                    data: consMonths.map((m) => {
+                    data: chartMonths.map((m) => {
                       const q = qtyByCat.get(cat)?.get(m)
                       const amount = data.expenses.find((e) => e.month === m && e.category === cat)?.amount
                       return q && q > 0 && amount ? Math.round((amount / q) * 10) / 10 : null

@@ -237,6 +237,80 @@ export interface LifeplanRow {
   assetsReal: number
 }
 
+export interface PlanHighlights {
+  peak: { year: number; assets: number } // 名目資産が最大になる年
+  retireYear: number | null // 全員が退職し終える年（生年が入っている大人のうち最も遅い退職年）
+  retireAssets: number | null // その年の名目資産
+  last: LifeplanRow // 80年後
+  totalIncome: number // 生涯の収入合計（名目）
+  totalExpense: number // 生涯の支出合計（名目）
+}
+
+/** グラフ横のサマリ用。rows は simulate の結果をそのまま渡す */
+export function planHighlights(rows: LifeplanRow[], cfg: LifeplanConfig): PlanHighlights {
+  const peakRow = rows.reduce((best, r) => (r.assetsNominal > best.assetsNominal ? r : best), rows[0])
+  const retireYears = cfg.adults
+    .filter((a) => a.birth_year && a.income_enabled)
+    .map((a) => a.birth_year! + a.retire_age)
+  const retireYear = retireYears.length ? Math.max(...retireYears) : null
+  const retireRow = retireYear === null ? null : rows.find((r) => r.year === retireYear) ?? null
+  return {
+    peak: { year: peakRow.year, assets: peakRow.assetsNominal },
+    retireYear,
+    retireAssets: retireRow ? retireRow.assetsNominal : null,
+    last: rows[rows.length - 1],
+    totalIncome: rows.reduce((s, r) => s + r.income, 0),
+    totalExpense: rows.reduce((s, r) => s + r.expense, 0),
+  }
+}
+
+export interface LifeEvent {
+  year: number
+  label: string
+}
+
+/**
+ * 年表用のライフイベント。設定から決まるもの（進学・卒業・住宅・退職・年金）と
+ * シミュレーション結果から決まるもの（資産のピーク・枯渇）をまとめて年順に返す。
+ */
+export function lifeEvents(cfg: LifeplanConfig, result: LifeplanResult, startYear: number = new Date().getFullYear()): LifeEvent[] {
+  const out: LifeEvent[] = []
+  const push = (year: number, label: string) => {
+    if (year >= startYear && year <= startYear + 80) out.push({ year, label })
+  }
+
+  cfg.children.forEach((c, i) => {
+    const who = `子${i + 1}`
+    push(c.birth_year, `${who} 誕生`)
+    push(c.birth_year + 6, `${who} 小学校入学（${c.elementary}）`)
+    push(c.birth_year + 12, `${who} 中学校入学（${c.junior}）`)
+    push(c.birth_year + 15, `${who} 高校入学（${c.high}）`)
+    if (c.path === '高卒') {
+      push(c.birth_year + 18, `${who} 高校卒業`)
+    } else {
+      push(c.birth_year + 18, `${who} 大学入学（${c.college}・${c.living}）`)
+      push(c.birth_year + (c.path === '大学院' ? 24 : 22), `${who} ${c.path === '大学院' ? '大学院' : '大学'}卒業`)
+    }
+  })
+
+  for (const a of cfg.adults) {
+    if (!a.birth_year) continue
+    if (a.income_enabled) push(a.birth_year + a.retire_age, `${a.name} 退職（${a.retire_age}歳）`)
+    push(a.birth_year + a.pension_start, `${a.name} 年金受給開始（${a.pension_start}歳）`)
+  }
+
+  if (cfg.home?.enabled) {
+    push(cfg.home.buy_year, 'マイホーム購入')
+    if (cfg.home.loan_years > 0) push(cfg.home.buy_year + cfg.home.loan_years, '住宅ローン完済')
+  }
+
+  const h = planHighlights(result.rows, cfg)
+  push(h.peak.year, '資産のピーク')
+  if (result.depletionYear !== null) push(result.depletionYear, '⚠ 資産がマイナスに')
+
+  return out.sort((a, b) => a.year - b.year || a.label.localeCompare(b.label))
+}
+
 export interface LifeplanResult {
   rows: LifeplanRow[]
   depletionYear: number | null // 資産が初めてマイナスになる年（なければnull）

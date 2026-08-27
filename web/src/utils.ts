@@ -437,6 +437,26 @@ export function expenseComposition(
 }
 
 /** 固定費の月割り内訳（指定月で有効なもの）。ドーナツ/一覧用・降順 */
+/**
+ * 先頭・末尾の「データが無い月」を落とす。
+ * 途中の欠けは時間軸が飛ばないように残す（グラフの横軸が等間隔でなくなるのを防ぐ）。
+ */
+export function trimEmptyMonths(months: string[], hasData: (m: string) => boolean): string[] {
+  let start = 0
+  let end = months.length - 1
+  while (start <= end && !hasData(months[start])) start++
+  while (end >= start && !hasData(months[end])) end--
+  return months.slice(start, end + 1)
+}
+
+/** 期間内の各固定費の合計（月割り額を月ごとに合算。開始前・終了後の月は0なので期間の実態が出る）。降順 */
+export function fixedCostBreakdownOver(fixedCosts: FixedCostRow[], months: string[]): Array<{ name: string; total: number }> {
+  return fixedCosts
+    .map((fc) => ({ name: fc.name, total: Math.round(months.reduce((s, m) => s + monthlyShare(fc, m), 0)) }))
+    .filter((x) => x.total > 0)
+    .sort((a, b) => b.total - a.total)
+}
+
 export function fixedCostBreakdown(fixedCosts: FixedCostRow[], month: string): Array<{ name: string; monthly: number }> {
   return fixedCosts
     .map((fc) => ({ name: fc.name, monthly: Math.round(monthlyShare(fc, month)) }))

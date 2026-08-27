@@ -15,7 +15,7 @@ import {
   estimateOtherExpense,
   expenseByMonth,
   expenseComposition,
-  fixedCostBreakdown,
+  fixedCostBreakdownOver,
   fixedMonthlyTotal,
   monthRange,
   netSalaryByMonth,
@@ -27,6 +27,7 @@ import {
   sortedAssets,
   thisMonth,
   totalLiabilitiesAt,
+  trimEmptyMonths,
   yen,
   yenShort,
 } from '../utils'
@@ -115,6 +116,11 @@ export default function HomeGraphs({ data }: { data: AllData }) {
   const incMap = useMemo(() => effectiveIncomeByMonth(data.furusato_salaries ?? []), [data])
   const expMap = useMemo(() => expenseByMonth(data.expenses), [data])
   const breakdown = useMemo(() => nonInvestBreakdownByMonth(data.assets, principalCap), [data, principalCap])
+  // グラフ用: 収入も変動費も記録が無い月は前後から落とす（全期間で空白が続かないように）
+  const cfChartMonths = useMemo(
+    () => trimEmptyMonths(chartMonths, (m) => expMap.has(m) || incMap.has(m)),
+    [chartMonths, expMap, incMap],
+  )
   const fixedOf = (m: string) => fixedMonthlyTotal(data.fixed_costs, m)
   const otherOf = (m: string) => estimateOtherExpense(incMap.get(m) ?? 0, fixedOf(m), expMap.get(m) ?? 0, breakdown.get(m)?.delta)
   const totalExp = (m: string) => fixedOf(m) + (expMap.get(m) ?? 0) + (otherOf(m) ?? 0)
@@ -142,7 +148,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
 
   const stats = useMemo(() => categoryStats(data.expenses, chartMonths), [data, chartMonths])
   const composition = useMemo(() => expenseComposition(data, chartMonths, principalCap), [data, chartMonths, principalCap])
-  const fixedBreakdown = useMemo(() => fixedCostBreakdown(data.fixed_costs, month), [data, month])
+  const fixedBreakdown = useMemo(() => fixedCostBreakdownOver(data.fixed_costs, chartMonths), [data, chartMonths])
 
   // ---- 消費量（period に追従） ----
   const consumptionCats = useMemo(() => {
@@ -157,6 +163,10 @@ export default function HomeGraphs({ data }: { data: AllData }) {
     }
     return m
   }, [data])
+  const consMonths = useMemo(
+    () => trimEmptyMonths(chartMonths, (m) => consumptionCats.some((c) => (qtyByCat.get(c)?.get(m) ?? 0) > 0)),
+    [chartMonths, consumptionCats, qtyByCat],
+  )
 
   // 現時点の負債合計（純資産の推移を出すかの判定に使う。期間ピッカーの影響を受けない）
   const liabilityTotal = totalLiabilitiesAt(liabilities, month)
@@ -423,13 +433,13 @@ export default function HomeGraphs({ data }: { data: AllData }) {
               <Chart
                 type="bar"
                 data={{
-                  labels: chartMonths.map(lbl),
+                  labels: cfChartMonths.map(lbl),
                   datasets: [
-                    { type: 'bar' as const, label: '収入', data: chartMonths.map((m) => incMap.get(m) ?? 0), backgroundColor: '#4ade80', stack: 'in' },
-                    { type: 'bar' as const, label: '固定費', data: chartMonths.map((m) => -fixedOf(m)), backgroundColor: '#fb923c', stack: 'out' },
-                    { type: 'bar' as const, label: '変動費', data: chartMonths.map((m) => -(expMap.get(m) ?? 0)), backgroundColor: '#f87171', stack: 'out' },
-                    { type: 'bar' as const, label: 'その他支出', data: chartMonths.map((m) => { const o = otherOf(m); return o === null ? null : -o }), backgroundColor: '#c084fc', stack: 'out' },
-                    { type: 'line' as const, label: '収支', data: chartMonths.map((m) => (incMap.get(m) ?? 0) - totalExp(m)), borderColor: '#38bdf8', tension: 0.3, stack: 'balance' },
+                    { type: 'bar' as const, label: '収入', data: cfChartMonths.map((m) => incMap.get(m) ?? 0), backgroundColor: '#4ade80', stack: 'in' },
+                    { type: 'bar' as const, label: '固定費', data: cfChartMonths.map((m) => -fixedOf(m)), backgroundColor: '#fb923c', stack: 'out' },
+                    { type: 'bar' as const, label: '変動費', data: cfChartMonths.map((m) => -(expMap.get(m) ?? 0)), backgroundColor: '#f87171', stack: 'out' },
+                    { type: 'bar' as const, label: 'その他支出', data: cfChartMonths.map((m) => { const o = otherOf(m); return o === null ? null : -o }), backgroundColor: '#c084fc', stack: 'out' },
+                    { type: 'line' as const, label: '収支', data: cfChartMonths.map((m) => (incMap.get(m) ?? 0) - totalExp(m)), borderColor: '#38bdf8', tension: 0.3, stack: 'balance' },
                   ],
                 }}
                 options={{ maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { x: { stacked: true, ...xTicks }, y: { stacked: true, ticks: { callback: (v) => yenShort(Number(v)) } } } }}
@@ -477,13 +487,13 @@ export default function HomeGraphs({ data }: { data: AllData }) {
           {fixedBreakdown.length > 0 && (
             <div className="card">
               <h2>
-                固定費の内訳（月割り）
-                <HelpTip title="固定費の内訳">固定費タブに登録した各項目の月割り額（年払い・2年払いは月換算）の内訳です。今月（{month}）時点の登録内容なので、期間の指定は影響しません。</HelpTip>
+                固定費の内訳（期間合計）
+                <HelpTip title="固定費の内訳">固定費タブに登録した各項目について、上で選んだ期間の月割り額（年払い・2年払いは月換算）を合計した内訳です。<br />「終了月」を入れて解約した項目は、その月までしか含まれません。</HelpTip>
               </h2>
               <div className="chart-box small">
                 <Doughnut
-                  data={{ labels: fixedBreakdown.map((f) => f.name), datasets: [{ data: fixedBreakdown.map((f) => f.monthly), backgroundColor: fixedBreakdown.map((_, i) => PALETTE[i % PALETTE.length]), borderColor: 'transparent' }] }}
-                  options={donutOpts(fixedBreakdown.map((f) => ({ value: f.monthly })))}
+                  data={{ labels: fixedBreakdown.map((f) => f.name), datasets: [{ data: fixedBreakdown.map((f) => f.total), backgroundColor: fixedBreakdown.map((_, i) => PALETTE[i % PALETTE.length]), borderColor: 'transparent' }] }}
+                  options={donutOpts(fixedBreakdown.map((f) => ({ value: f.total })))}
                 />
               </div>
             </div>
@@ -493,7 +503,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
             <h2>変動費カテゴリ別の推移</h2>
             <div className="chart-box">
               <Line
-                data={{ labels: chartMonths.map(lbl), datasets: [...catTrend.entries()].map(([cat, map], i) => ({ label: cat, data: chartMonths.map((m) => map.get(m) ?? null), borderColor: PALETTE[i % PALETTE.length], tension: 0.3 })) }}
+                data={{ labels: cfChartMonths.map(lbl), datasets: [...catTrend.entries()].map(([cat, map], i) => ({ label: cat, data: cfChartMonths.map((m) => map.get(m) ?? null), borderColor: PALETTE[i % PALETTE.length], tension: 0.3 })) }}
                 options={{ maintainAspectRatio: false, spanGaps: true, interaction: { mode: 'index', intersect: false }, scales: monthYenScales }}
               />
             </div>
@@ -551,7 +561,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
             <h2>消費量の推移</h2>
             <div className="chart-box">
               <Line
-                data={{ labels: chartMonths.map(lbl), datasets: consumptionCats.map((cat, i) => ({ label: `${cat}(${CONSUMPTION_UNITS[cat]})`, data: chartMonths.map((m) => qtyByCat.get(cat)?.get(m) ?? null), borderColor: PALETTE[i % PALETTE.length], tension: 0.3 })) }}
+                data={{ labels: consMonths.map(lbl), datasets: consumptionCats.map((cat, i) => ({ label: `${cat}(${CONSUMPTION_UNITS[cat]})`, data: consMonths.map((m) => qtyByCat.get(cat)?.get(m) ?? null), borderColor: PALETTE[i % PALETTE.length], tension: 0.3 })) }}
                 options={{ maintainAspectRatio: false, spanGaps: true, interaction: { mode: 'index', intersect: false }, scales: { x: xTicks } }}
               />
             </div>
@@ -562,10 +572,10 @@ export default function HomeGraphs({ data }: { data: AllData }) {
             <div className="chart-box">
               <Line
                 data={{
-                  labels: chartMonths.map(lbl),
+                  labels: consMonths.map(lbl),
                   datasets: consumptionCats.map((cat, i) => ({
                     label: `${cat}(円/${CONSUMPTION_UNITS[cat]})`,
-                    data: chartMonths.map((m) => {
+                    data: consMonths.map((m) => {
                       const q = qtyByCat.get(cat)?.get(m)
                       const amount = data.expenses.find((e) => e.month === m && e.category === cat)?.amount
                       return q && q > 0 && amount ? Math.round((amount / q) * 10) / 10 : null

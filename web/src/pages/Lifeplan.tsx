@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Chart, Line } from 'react-chartjs-2'
 import HelpTip from '../components/HelpTip'
 import { getConst } from '../constants'
 import {
+  DEFAULT_LIFEPLAN,
   childAllowanceByIndex,
   childAnnualCost,
   estimateIncome,
@@ -30,15 +31,12 @@ const NEW_ADULT = (name: string): LifeplanAdult => ({
 
 export default function Lifeplan() {
   const { data, mutate, saving } = useStore()
-  const [cfg, setCfg] = useState<LifeplanConfig | null>(null)
   const [msg, setMsg] = useState('')
-  const [scenarioName, setScenarioName] = useState('')
-  const [planA, setPlanA] = useState('')  // '' = 現在の設定
+  const [planA, setPlanA] = useState('')  // 表示中のシナリオ名
   const [planB, setPlanB] = useState('')  // '' = 比較しない
-  // 'view' = グラフ・表だけ / 'edit' = 入力画面。newName があれば別シナリオとして保存する
-  const [editing, setEditing] = useState<{ draft: LifeplanConfig; title: string; newName: string | null } | null>(null)
-  const [newName, setNewName] = useState('')
-  const [surveyOpen, setSurveyOpen] = useState(false)
+  // 編集中の下書き（null = 閲覧モード）。originalName が null なら新規作成
+  const [edit, setEdit] = useState<{ draft: LifeplanConfig; originalName: string | null } | null>(null)
+  const [survey, setSurvey] = useState(false) // アンケート画面
   const [renaming, setRenaming] = useState<{ from: string; to: string } | null>(null)
 
   const persons = useMemo(() => {
@@ -47,12 +45,44 @@ export default function Lifeplan() {
     return list.length ? list : DEFAULT_PERSONS
   }, [data])
 
-  // 保存済み設定を初回だけ読み込み（大人が未設定なら管理者リストから雛形を作る）
+  // 保存済みシナリオ（settings の lifeplan_scenarios にJSON保存）
+  const scenarios = useMemo(() => {
+    const raw = data?.settings.find((s) => s.key === 'lifeplan_scenarios')?.value
+    try {
+      const v = raw ? (JSON.parse(raw) as Array<{ name: string; config: LifeplanConfig }>) : []
+      return Array.isArray(v) ? v : []
+    } catch {
+      return []
+    }
+  }, [data])
+
+  const persistScenarios = (list: Array<{ name: string; config: LifeplanConfig }>) =>
+    mutate('setSetting', { row: { key: 'lifeplan_scenarios', value: JSON.stringify(list) } })
+
+  // 旧「現在の設定」(lifeplan_config) しか無い場合は、シナリオ1件に移行する（後から改名可）
+  const migrated = useRef(false)
   useEffect(() => {
-    if (!data || cfg) return
-    const saved = parseLifeplan(data.settings.find((s) => s.key === 'lifeplan_config')?.value)
-    setCfg(saved.adults.length ? saved : { ...saved, adults: persons.map(NEW_ADULT) })
-  }, [data, cfg, persons])
+    if (!data || migrated.current || scenarios.length > 0) return
+    const raw = data.settings.find((s) => s.key === 'lifeplan_config')?.value
+    if (!raw) return
+    migrated.current = true
+    const saved = parseLifeplan(raw)
+    void persistScenarios([{ name: 'マイプラン', config: saved.adults.length ? saved : { ...saved, adults: persons.map(NEW_ADULT) } }])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, scenarios, persons])
+
+  // 表示対象（A）の既定は先頭のシナリオ
+  useEffect(() => {
+    if (scenarios.length === 0) return
+    if (!scenarios.some((x) => x.name === planA)) setPlanA(scenarios[0].name)
+  }, [scenarios, planA])
+
+  // 表示・編集の対象になっている設定。編集中は下書き、そうでなければ A のシナリオ
+  const cfg = useMemo(() => {
+    if (edit) return edit.draft
+    const sc = scenarios.find((x) => x.name === planA)
+    return sc ? parseLifeplan(JSON.stringify(sc.config)) : null
+  }, [edit, scenarios, planA])
 
   // 年収の想定（給与データより・手取り/額面）: 今年→無ければ直近年
   // 管理者リストに無い名前（リネーム前の名前など）も cfg 側にあれば対象にする
@@ -130,17 +160,6 @@ export default function Lifeplan() {
     [cfg, startInvest, startLiquid, resolvedNet, resolvedPension, resolvedLiving],
   )
 
-  // 保存済みシナリオ（settings の lifeplan_scenarios にJSON保存）
-  const scenarios = useMemo(() => {
-    const raw = data?.settings.find((s) => s.key === 'lifeplan_scenarios')?.value
-    try {
-      const v = raw ? (JSON.parse(raw) as Array<{ name: string; config: LifeplanConfig }>) : []
-      return Array.isArray(v) ? v : []
-    } catch {
-      return []
-    }
-  }, [data])
-
   // 比較対象のシミュレーション（同じ開始資産・収入前提で設定差だけを比較）
   // 保存シナリオを同じ開始資産・収入前提でシミュレート（設定差だけが結果差になる）
   const simScenario = useMemo(
@@ -152,23 +171,39 @@ export default function Lifeplan() {
     },
     [scenarios, startInvest, startLiquid, resolvedNet, resolvedPension, resolvedLiving],
   )
-  // A: 既定は「現在の設定」。保存シナリオを選ぶとそちらを表示する
+  // A の結果（cfg は A のシナリオ）
   const resultA = useMemo(() => (planA ? simScenario(planA) : result), [planA, simScenario, result])
   const resultB = useMemo(() => (planB ? simScenario(planB) : null), [planB, simScenario])
 
-  if (!cfg || !result) return <p className="muted center">読み込み中…</p>
+  // シナリオがまだ無いときは作成を促す（アンケート画面・編集画面はこの前で分岐する）
+  if (!cfg || !result) {
+    if (!data) return <p className="muted center">読み込み中…</p>
+    return (
+      <div className="card">
+        <h2>ライフプランのシナリオを作りましょう</h2>
+        <p className="muted" style={{ fontSize: 13 }}>
+          収入・子供・住まいなどの前提を「シナリオ」として保存し、見比べる画面です。
+          まずは1つ作ってください（あとから何度でも編集・複製できます）。
+        </p>
+        <button className="btn" style={{ marginBottom: 8 }} onClick={() => { setSurvey(true); setMsg('') }}>
+          アンケートに答えて作る（かんたん）
+        </button>
+        <button className="btn secondary"
+          onClick={() => startEdit({ ...DEFAULT_LIFEPLAN, adults: persons.map(NEW_ADULT) }, null)}>
+          手入力で作る
+        </button>
+        {msg && <p className="pos center" style={{ margin: '8px 0 0' }}>{msg}</p>}
+      </div>
+    )
+  }
 
-  const upd = (patch: Partial<LifeplanConfig>) => setCfg({ ...cfg, ...patch })
+  // 編集は下書きに対して行う
+  const upd = (patch: Partial<LifeplanConfig>) =>
+    setEdit((e) => (e ? { ...e, draft: { ...e.draft, ...patch } } : e))
   const updAdult = (i: number, patch: Partial<LifeplanAdult>) =>
     upd({ adults: cfg.adults.map((a, j) => (j === i ? { ...a, ...patch } : a)) })
   const updChild = (i: number, patch: Partial<LifeplanChild>) =>
     upd({ children: cfg.children.map((c, j) => (j === i ? { ...c, ...patch } : c)) })
-
-  const save = async () => {
-    setMsg('')
-    await mutate('setSetting', { row: { key: 'lifeplan_config', value: JSON.stringify(cfg) } })
-    setMsg('設定を保存しました ✓')
-  }
 
   const head = cfg.adults[0]
   const labels = result.rows.map((r) => {
@@ -177,34 +212,9 @@ export default function Lifeplan() {
   })
   const tickOpts = { maxTicksLimit: 9, maxRotation: 0 as const }
 
-  const persistScenarios = (list: Array<{ name: string; config: LifeplanConfig }>) =>
-    mutate('setSetting', { row: { key: 'lifeplan_scenarios', value: JSON.stringify(list) } })
-
-  const saveScenario = async () => {
-    const name = scenarioName.trim()
-    if (!name || !cfg) return
-    // 同名は上書き（順序は保持）、無ければ末尾に追加
-    const exists = scenarios.some((s) => s.name === name)
-    const next = exists
-      ? scenarios.map((s) => (s.name === name ? { name, config: cfg } : s))
-      : [...scenarios, { name, config: cfg }]
-    await persistScenarios(next)
-    setScenarioName('')
-    setMsg(`シナリオ「${name}」を保存しました ✓`)
-  }
-
-  const loadScenario = (name: string) => {
-    const sc = scenarios.find((s) => s.name === name)
-    if (!sc) return
-    if (!window.confirm(`現在の設定をシナリオ「${name}」の内容で置き換えます。よろしいですか？（保存前の変更は失われます）`)) return
-    setCfg(parseLifeplan(JSON.stringify(sc.config)))
-    setMsg(`シナリオ「${name}」を読み込みました（「設定を保存」で確定）`)
-  }
-
   const deleteScenario = async (name: string) => {
     if (!window.confirm(`シナリオ「${name}」を削除しますか？`)) return
     await persistScenarios(scenarios.filter((s) => s.name !== name))
-    if (planA === name) setPlanA('')
     if (planB === name) setPlanB('')
   }
 
@@ -235,10 +245,9 @@ export default function Lifeplan() {
     await persistScenarios(next)
   }
 
-  // グラフ・サマリは A を表示する（A 未選択なら「現在の設定」）
-  const CURRENT = '現在の設定'
+  // グラフ・サマリは A のシナリオを表示する
   const rA = resultA ?? result
-  const nameA = planA || CURRENT
+  const nameA = planA
   const nameB = planB
   const lastA = rA.rows[rA.rows.length - 1]
   const lastB = resultB?.rows[resultB.rows.length - 1]
@@ -251,36 +260,32 @@ export default function Lifeplan() {
     </span>
   )
 
-  // ---- 入力画面（編集モード） ----
-  const startEdit = (draft: LifeplanConfig, title: string, asNew: string | null) => {
-    setEditing({ draft, title, newName: asNew })
-    setCfg(draft)
+  // ---- 編集・アンケート画面 ----
+  const startEdit = (draft: LifeplanConfig, originalName: string | null) => {
+    setEdit({ draft, originalName })
+    setSurvey(false)
     setMsg('')
   }
   const cancelEdit = () => {
-    // 編集前の内容へ戻す（保存済みの設定を読み直す）
-    setCfg(parseLifeplan(data?.settings.find((x) => x.key === 'lifeplan_config')?.value))
-    setEditing(null)
+    setEdit(null)
     setMsg('編集をキャンセルしました')
   }
-  const commitEdit = async () => {
-    if (editing?.newName) {
-      const name = editing.newName
-      const exists = scenarios.some((x) => x.name === name)
-      const next = exists
-        ? scenarios.map((x) => (x.name === name ? { name, config: cfg } : x))
-        : [...scenarios, { name, config: cfg }]
-      await persistScenarios(next)
-      // 現在の設定は元に戻す（新規作成は非破壊）
-      setCfg(parseLifeplan(data?.settings.find((x) => x.key === 'lifeplan_config')?.value))
-      setMsg(`シナリオ「${name}」を作成しました ✓`)
-    } else {
-      await save()
-    }
-    setEditing(null)
+  /** name=null なら originalName を上書き、name があればその名前で保存（新規 or 別名） */
+  const commitEdit = async (name: string | null) => {
+    if (!edit) return
+    const target = name ?? edit.originalName
+    if (!target) return
+    const exists = scenarios.some((x) => x.name === target)
+    const next = exists
+      ? scenarios.map((x) => (x.name === target ? { name: target, config: edit.draft } : x))
+      : [...scenarios, { name: target, config: edit.draft }]
+    await persistScenarios(next)
+    setEdit(null)
+    setPlanA(target)
+    setMsg(`シナリオ「${target}」を保存しました ✓`)
   }
 
-  if (editing) {
+  if (edit) {
     return (
       <LifeplanEditor
         cfg={cfg}
@@ -292,16 +297,51 @@ export default function Lifeplan() {
         livingEstimate={livingEstimate}
         persons={persons}
         latestAssets={latestAssets}
-        title={editing.title}
+        originalName={edit.originalName}
         saving={saving}
-        onSave={() => void commitEdit()}
+        onSave={(n) => void commitEdit(n)}
         onCancel={cancelEdit}
       />
     )
   }
 
+  if (survey) {
+    return (
+      <ScenarioSurveyCard
+        base={cfg}
+        saving={saving}
+        onSave={async (name, generated) => {
+          const exists = scenarios.some((x) => x.name === name)
+          const next = exists
+            ? scenarios.map((x) => (x.name === name ? { name, config: generated } : x))
+            : [...scenarios, { name, config: generated }]
+          await persistScenarios(next)
+          setSurvey(false)
+          setPlanA(name)
+          setMsg(`シナリオ「${name}」を作成しました ✓`)
+        }}
+        onApply={(generated) => startEdit(generated, null)}
+        onCancel={() => { setSurvey(false); setMsg('') }}
+      />
+    )
+  }
+
   const highlights = planHighlights(rA.rows, cfg)
-  const events = lifeEvents(planA ? parseLifeplan(JSON.stringify(scenarios.find((x) => x.name === planA)?.config ?? cfg)) : cfg, rA, thisYear)
+  const events = lifeEvents(cfg, rA, thisYear)
+
+  // 年表の色分け。暗い背景で読みやすい定番色を対象者ごとに固定順で割り当てる
+  const ADULT_COLORS = ['#38bdf8', '#4ade80']
+  const CHILD_COLORS = ['#fbbf24', '#c084fc', '#f472b6']
+  const COMMON_COLOR = '#94a3b8'
+  const whoColor = new Map<string, string>()
+  cfg.adults.forEach((a, i) => whoColor.set(a.name, ADULT_COLORS[i % ADULT_COLORS.length]))
+  cfg.children.forEach((_, i) => whoColor.set(`子${i + 1}`, CHILD_COLORS[i % CHILD_COLORS.length]))
+  const eventColor = (e: { who: string | null; label: string }) =>
+    e.label.startsWith('⚠') ? '#f87171' : (e.who ? whoColor.get(e.who) ?? COMMON_COLOR : COMMON_COLOR)
+  const eventLegend = [
+    ...[...whoColor.entries()].filter(([w]) => events.some((e) => e.who === w)).map(([who, color]) => ({ who, color })),
+    ...(events.some((e) => e.who === null) ? [{ who: '世帯共通', color: COMMON_COLOR }] : []),
+  ]
 
   return (
     <>
@@ -309,39 +349,29 @@ export default function Lifeplan() {
         <h2>
           シナリオ比較
           <HelpTip title="シナリオ比較">
-            現在の設定に名前を付けて保存し、別の設定と比較できます（例:「私立コース」「マイホーム購入」）。
+            シナリオを作って見比べる画面です（例:「私立コース」「マイホーム購入」）。A に選んだシナリオがグラフ・表に出ます。
             比較を選ぶとグラフに黄色の破線でもう1本が重なり、80年後の資産と枯渇年を並べて確認できます。
             比較は同じ開始資産・収入前提で行うので、<b>設定の違いだけ</b>が結果の差になります。
           </HelpTip>
         </h2>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
-          <button className="btn small" style={{ width: 'auto' }}
-            onClick={() => startEdit(planA ? parseLifeplan(JSON.stringify(scenarios.find((x) => x.name === planA)!.config)) : cfg, planA || CURRENT, planA || null)}>
-            ✎ {planA || CURRENT}を編集
+          <button className="btn small" style={{ width: 'auto' }} disabled={!planA}
+            onClick={() => startEdit(parseLifeplan(JSON.stringify(cfg)), planA)}>
+            ✎ 「{planA}」を編集
           </button>
-          <button className="btn small secondary" style={{ width: 'auto' }} onClick={() => setSurveyOpen((v) => !v)}>
-            {surveyOpen ? '× アンケートを閉じる' : '＋ アンケートで新規作成'}
+          <button className="btn small secondary" style={{ width: 'auto' }} onClick={() => { setSurvey(true); setMsg('') }}>
+            ＋ アンケートで新規作成
           </button>
-        </div>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'end', marginBottom: 10 }}>
-          <label className="field" style={{ marginBottom: 0, flex: 1 }}>手入力で新規作成（名前を付けて編集へ）
-            <input type="text" placeholder="例: 私立コース" value={newName} onChange={(e) => setNewName(e.target.value)} /></label>
-          <button className="btn small secondary" style={{ width: 'auto', marginBottom: 2 }} disabled={!newName.trim()}
-            onClick={() => { startEdit(parseLifeplan(JSON.stringify(cfg)), newName.trim(), newName.trim()); setNewName('') }}>
-            編集へ
+          <button className="btn small secondary" style={{ width: 'auto' }}
+            onClick={() => startEdit(parseLifeplan(JSON.stringify(cfg)), null)}>
+            ＋ 手入力で新規作成
           </button>
-        </div>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'end', marginBottom: 8 }}>
-          <label className="field" style={{ marginBottom: 0, flex: 1 }}>現在の設定をそのままシナリオとして保存
-            <input type="text" placeholder="例: 今の想定" value={scenarioName} onChange={(e) => setScenarioName(e.target.value)} /></label>
-          <button className="btn small secondary" style={{ width: 'auto', marginBottom: 2 }} disabled={saving || !scenarioName.trim()} onClick={() => void saveScenario()}>保存</button>
         </div>
         {scenarios.length > 0 ? (
           <>
             <div className="row2">
               <label className="field">A（青の実線）
                 <select value={planA} onChange={(e) => setPlanA(e.target.value)}>
-                  <option value="">{CURRENT}</option>
                   {scenarios.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}
                 </select></label>
               <label className="field">B（黄の破線）
@@ -370,7 +400,7 @@ export default function Lifeplan() {
                           <div key={k} style={{ marginBottom: 2 }}>{line}</div>
                         ))}
                       </HelpTip>
-                      <button className="btn small secondary" onClick={() => loadScenario(s.name)}>読込</button>
+                      <button className="btn small secondary" onClick={() => startEdit(parseLifeplan(JSON.stringify(s.config)), s.name)}>編集</button>
                       <button className="btn small secondary" onClick={() => setRenaming({ from: s.name, to: s.name })}>改名</button>
                       <button className="btn danger small" onClick={() => void deleteScenario(s.name)}>削除</button>
                     </>
@@ -408,20 +438,6 @@ export default function Lifeplan() {
         )}
       </div>
 
-      {surveyOpen && (
-      <ScenarioSurveyCard
-        base={cfg}
-        saving={saving}
-        onSave={async (name, generated) => {
-          const exists = scenarios.some((x) => x.name === name)
-          const next = exists
-            ? scenarios.map((x) => (x.name === name ? { name, config: generated } : x))
-            : [...scenarios, { name, config: generated }]
-          await persistScenarios(next)
-        }}
-        onApply={(generated) => { startEdit(generated, CURRENT, null); setSurveyOpen(false) }}
-      />
-      )}
 
       <div className="card">
         <h2>
@@ -469,12 +485,6 @@ export default function Lifeplan() {
             : <Chip color="#c084fc" dashed text="実質資産（今の価値）" />}
           {head?.birth_year && <span className="muted" style={{ fontSize: 11 }}>※横軸カッコ内は{head.name}の年齢</span>}
         </div>
-        {planA && (
-          <p className="muted" style={{ fontSize: 12, margin: '0 0 8px', color: 'var(--amber)' }}>
-            ⚠ グラフはシナリオ「{planA}」を表示中です。下の設定フォームは「{CURRENT}」の編集で、このグラフには反映されません。
-            <button className="linklike" style={{ marginLeft: 6, fontSize: 12 }} onClick={() => setPlanA('')}>現在の設定に戻す</button>
-          </p>
-        )}
         <div className="chart-box">
           <Line
             data={{
@@ -600,24 +610,30 @@ export default function Lifeplan() {
               シミュレーション結果から決まる年（資産のピーク・資産がマイナスになる年）をまとめたものです。
             </HelpTip>
           </h2>
+          <div style={{ marginBottom: 6 }}>
+            {eventLegend.map((l) => (
+              <span key={l.who} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, marginRight: 10 }}>
+                <span style={{ width: 10, height: 10, borderRadius: 2, background: l.color }} />
+                <span style={{ color: l.color }}>{l.who}</span>
+              </span>
+            ))}
+          </div>
           <div style={{ overflowX: 'auto', maxHeight: 360, overflowY: 'auto' }}>
             <table style={{ fontSize: 12, borderCollapse: 'collapse', whiteSpace: 'nowrap', width: '100%' }}>
               <tbody>
                 {events.map((e, i) => (
                   <tr key={`${e.year}-${i}`} style={{ borderTop: '1px solid var(--border)' }}>
-                    <td style={{ padding: 4, width: 80 }}>
+                    <td style={{ padding: 4, width: 82 }}>
                       {e.year}
-                      {head?.birth_year ? <span className="muted">（{e.year - head.birth_year}）</span> : null}
+                      {e.birthYear !== null ? <span className="muted">（{e.year - e.birthYear}）</span> : null}
                     </td>
-                    <td style={{ padding: 4 }} className={e.label.startsWith('⚠') ? 'neg' : ''}>{e.label}</td>
+                    <td style={{ padding: 4, color: eventColor(e) }}>{e.label}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <p className="muted" style={{ fontSize: 11, margin: '4px 0 0' }}>
-            カッコ内は{head?.birth_year ? `${head.name}の年齢` : '年齢'}
-          </p>
+          <p className="muted" style={{ fontSize: 11, margin: '4px 0 0' }}>カッコ内は年齢</p>
         </div>
       )}
 

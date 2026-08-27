@@ -45,13 +45,20 @@ export default function PersonEditor() {
         await mutate('setSetting', { row: { key: 'furusato_profile', value: JSON.stringify({ ...prof, head_person: to }) } })
       }
     }
-    const lifeplanRaw = data?.settings.find((s) => s.key === 'lifeplan_config')?.value
-    if (lifeplanRaw) {
+    // ライフプランの全シナリオの大人名も追従させる（直さないと収入の紐付けが切れる）
+    const scenariosRaw = data?.settings.find((s) => s.key === 'lifeplan_scenarios')?.value
+    if (scenariosRaw) {
       try {
-        const plan = JSON.parse(lifeplanRaw) as { adults?: Array<{ name: string }> }
-        if (plan.adults?.some((a) => a.name === from)) {
-          plan.adults = plan.adults.map((a) => (a.name === from ? { ...a, name: to } : a))
-          await mutate('setSetting', { row: { key: 'lifeplan_config', value: JSON.stringify(plan) } })
+        const list = JSON.parse(scenariosRaw) as Array<{ name: string; config: { adults?: Array<{ name: string }> } }>
+        if (Array.isArray(list) && list.some((sc) => sc.config?.adults?.some((a) => a.name === from))) {
+          const next = list.map((sc) => ({
+            ...sc,
+            config: {
+              ...sc.config,
+              adults: (sc.config?.adults ?? []).map((a) => (a.name === from ? { ...a, name: to } : a)),
+            },
+          }))
+          await mutate('setSetting', { row: { key: 'lifeplan_scenarios', value: JSON.stringify(next) } })
         }
       } catch {
         /* 壊れたJSONは触らない */

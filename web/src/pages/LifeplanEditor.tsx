@@ -9,6 +9,7 @@ import {
   type LifeplanChild,
   type LifeplanConfig,
 } from '../lifeplan'
+import { applyStandardExpenses } from '../lifeplanSurvey'
 import { amt, yen } from '../utils'
 
 const thisYear = new Date().getFullYear()
@@ -65,10 +66,11 @@ export interface EditorProps {
   persons: string[]
   /** 最新スナップショットの資産合計（開始資産のプレースホルダ用） */
   latestAssets: number | null
-  /** 見出しに出す編集対象の名前 */
-  title: string
+  /** 編集対象のシナリオ名。新規作成なら null */
+  originalName: string | null
   saving?: boolean
-  onSave: () => void
+  /** name を渡すとその名前で保存（新規 or 別名）。null なら originalName を上書き */
+  onSave: (name: string | null) => void
   onCancel: () => void
 }
 
@@ -77,14 +79,15 @@ export interface EditorProps {
  * （プラン画面は普段グラフ・表のみを表示し、修正・新規作成のときだけこの画面に入る）
  */
 export default function LifeplanEditor({
-  cfg, upd, updAdult, updChild, estimatedIncome, pensionEstOf, livingEstimate, persons, latestAssets, title, saving, onSave, onCancel,
+  cfg, upd, updAdult, updChild, estimatedIncome, pensionEstOf, livingEstimate, persons, latestAssets, originalName, saving, onSave, onCancel,
 }: EditorProps) {
+  const [saveAs, setSaveAs] = useState('')
   return (
     <>
       <div className="card">
-        <h2>設定を編集: {title}</h2>
+        <h2>{originalName ? `シナリオを編集: ${originalName}` : '新しいシナリオを作成'}</h2>
         <p className="muted" style={{ fontSize: 12, margin: 0 }}>
-          変更は「保存」を押すまで反映されません。「キャンセル」で編集前の内容に戻ります。
+          変更は保存を押すまで反映されません。「キャンセル」で編集前の内容に戻ります。
         </p>
       </div>
 
@@ -286,6 +289,9 @@ export default function LifeplanEditor({
           <button className="btn secondary small" onClick={() => upd({ custom_flows: [...cfg.custom_flows, { label: '車の買替', start_year: thisYear + 5, end_year: thisYear + 5, annual: -2_500_000 }] })}>
             ＋ 車の買替
           </button>
+          <button className="btn secondary small" onClick={() => upd({ custom_flows: applyStandardExpenses(cfg, 'standard') })}>
+            ＋ 一般的な支出をまとめて
+          </button>
           <HelpTip title="テンプレの目安">
             親の介護: 月9万円（在宅〜施設の中間的な自己負担の目安）×5年。年数・金額は各行で調整してください。
             公的介護保険で7〜9割は給付されるため、ここに入れるのは自己負担分です。医療費控除で一部戻る場合がありますが小さいため考慮していません。
@@ -344,9 +350,21 @@ export default function LifeplanEditor({
       </div>
 
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-        <button className="btn" onClick={onSave} disabled={saving}>{saving ? '保存中…' : '保存'}</button>
-        <button className="btn secondary" onClick={onCancel} disabled={saving}>キャンセル</button>
+      <div className="card">
+        <h2>保存</h2>
+        {originalName && (
+          <button className="btn" style={{ marginBottom: 10 }} onClick={() => onSave(null)} disabled={saving}>
+            {saving ? '保存中…' : `「${originalName}」に上書き保存`}
+          </button>
+        )}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'end' }}>
+          <label className="field" style={{ marginBottom: 0, flex: 1 }}>{originalName ? '別名で保存（新しいシナリオになります）' : 'シナリオ名'}
+            <input type="text" placeholder="例: 私立コース" value={saveAs} onChange={(e) => setSaveAs(e.target.value)} /></label>
+          <button className="btn small" style={{ width: 'auto', marginBottom: 2 }} disabled={saving || !saveAs.trim()} onClick={() => onSave(saveAs.trim())}>
+            {originalName ? '別名で保存' : '作成'}
+          </button>
+        </div>
+        <button className="btn secondary" style={{ marginTop: 10 }} onClick={onCancel} disabled={saving}>キャンセル</button>
       </div>
     </>
   )

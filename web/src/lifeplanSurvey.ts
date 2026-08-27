@@ -28,6 +28,70 @@ const CAR_PRICE = 2_500_000 // 1台あたりの想定買い替え費用
 export const CAR_LABEL = '車の買い替え'
 export const CARE_LABEL = '親の介護'
 
+/** 「一般的な支出」テンプレで作る行のラベル接頭辞（再適用・削除の目印） */
+export const STD_PREFIX = '一般:'
+export type StandardLevel = 'none' | 'standard' | 'high'
+
+const REPAIR_CYCLE_YEARS = 15
+const REPAIR_COST = 2_000_000 // 大規模修繕1回あたり
+const APPLIANCE_ANNUAL = 50_000 // 家電の買い替え（年額に均した額）
+const CEREMONY_ANNUAL = 100_000 // 冠婚葬祭・帰省など
+/** 医療費（自己負担の目安・1人あたり年額）。年齢帯ごと */
+const MEDICAL_TIERS: Array<{ from: number; to: number; annual: number }> = [
+  { from: 60, to: 69, annual: 100_000 },
+  { from: 70, to: 79, annual: 200_000 },
+  { from: 80, to: 100, annual: 300_000 },
+]
+
+/**
+ * 一般的なライフイベント支出のテンプレ行。
+ * ラベルは STD_PREFIX 付きにしてあり、再適用時は同じ接頭辞の行を入れ替える想定。
+ * level='high' は各額を1.5倍。'none' は空配列（＝呼び出し側で既存行が消える）。
+ */
+export function standardExpenseFlows(
+  cfg: LifeplanConfig,
+  level: StandardLevel,
+  thisYear: number = new Date().getFullYear(),
+): CustomFlow[] {
+  if (level === 'none') return []
+  const k = level === 'high' ? 1.5 : 1
+  const end = thisYear + 80
+  const out: CustomFlow[] = []
+
+  if (cfg.home?.enabled) {
+    out.push({
+      label: `${STD_PREFIX}住宅の大規模修繕`,
+      start_year: cfg.home.buy_year,
+      end_year: end,
+      annual: -Math.round((REPAIR_COST / REPAIR_CYCLE_YEARS) * k),
+    })
+  }
+  out.push({ label: `${STD_PREFIX}家電の買い替え`, start_year: thisYear, end_year: end, annual: -Math.round(APPLIANCE_ANNUAL * k) })
+  out.push({ label: `${STD_PREFIX}冠婚葬祭・帰省など`, start_year: thisYear, end_year: end, annual: -Math.round(CEREMONY_ANNUAL * k) })
+
+  for (const a of cfg.adults) {
+    if (!a.birth_year) continue
+    for (const t of MEDICAL_TIERS) {
+      const from = Math.max(thisYear, a.birth_year + t.from)
+      const to = Math.min(end, a.birth_year + t.to)
+      if (from > to) continue
+      out.push({
+        label: `${STD_PREFIX}医療費（${a.name}・${t.from}${t.from >= 80 ? '歳〜' : '代'}）`,
+        start_year: from,
+        end_year: to,
+        annual: -Math.round(t.annual * k),
+      })
+    }
+  }
+  return out
+}
+
+/** 既存のカスタム収支から「一般的な支出」行を入れ替える（手入力した行は残す） */
+export function applyStandardExpenses(cfg: LifeplanConfig, level: StandardLevel, thisYear?: number): CustomFlow[] {
+  const kept = cfg.custom_flows.filter((f) => !f.label.startsWith(STD_PREFIX))
+  return [...kept, ...standardExpenseFlows(cfg, level, thisYear)]
+}
+
 export const SURVEY_QUESTIONS: SurveyQuestion[] = [
   {
     id: 'children',
@@ -102,6 +166,16 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
       { value: 'flat', label: '変わらない' },
       { value: 'mild', label: '少し上がる', note: '昇給率 −0.3%' },
       { value: 'steep', label: 'かなり上がる', note: '昇給率 −0.8%' },
+    ],
+  },
+  {
+    id: 'standard',
+    question: '一般的なライフイベント費用（住宅修繕・家電・冠婚葬祭・医療費）を含めますか？',
+    mode: 'both',
+    options: [
+      { value: 'none', label: '含めない' },
+      { value: 'standard', label: '標準で含める', note: '家電5万/年・冠婚葬祭10万/年・医療費は年齢に応じて増加' },
+      { value: 'high', label: '多めに見る', note: '標準の1.5倍' },
     ],
   },
   // ---- ここから詳細版だけの質問 ----
@@ -265,6 +339,9 @@ export function buildConfigFromAnswers(
   if (answers.inflation) cfg.inflation = Number(answers.inflation)
   if (answers.retire) cfg.adults = cfg.adults.map((a) => ({ ...a, retire_age: Number(answers.retire) }))
   if (answers.living) cfg.living_cost = answers.living === 'auto' ? null : Number(answers.living)
+
+  // 一般的な支出は住まい・大人が確定したあとで組み立てる
+  if (answers.standard) cfg.custom_flows = applyStandardExpenses(cfg, answers.standard as StandardLevel, thisYear)
 
   return cfg
 }

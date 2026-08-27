@@ -14,8 +14,10 @@ interface Props {
   base: LifeplanConfig
   /** 生成した設定をシナリオとして保存 */
   onSave: (name: string, cfg: LifeplanConfig) => Promise<void> | void
-  /** 生成した設定を現在の設定に反映 */
+  /** 生成した設定をそのまま編集画面へ渡す */
   onApply: (cfg: LifeplanConfig) => void
+  /** 画面を閉じる */
+  onCancel: () => void
   saving?: boolean
 }
 
@@ -23,8 +25,7 @@ interface Props {
  * いくつかの選択式の質問に答えるだけでライフプランのシナリオを作るカード。
  * 生成結果は必ずプレビューしてから「保存」または「現在の設定に反映」を選ぶ。
  */
-export default function ScenarioSurveyCard({ base, onSave, onApply, saving }: Props) {
-  const [open, setOpen] = useState(false)
+export default function ScenarioSurveyCard({ base, onSave, onApply, onCancel, saving }: Props) {
   const [mode, setMode] = useState<SurveyMode>('simple')
   const [answers, setAnswers] = useState<SurveyAnswers>(() => defaultAnswers('simple'))
   const [name, setName] = useState('')
@@ -45,14 +46,10 @@ export default function ScenarioSurveyCard({ base, onSave, onApply, saving }: Pr
     if (!n) return
     await onSave(n, generated)
     setName('')
-    setMsg(`シナリオ「${n}」を作成しました ✓ 比較のA/Bから選べます`)
+    setMsg(`シナリオ「${n}」を作成しました ✓`)
   }
 
-  const apply = () => {
-    if (!window.confirm('アンケートの内容で現在の設定を置き換えます。よろしいですか？（保存前の変更は失われます）')) return
-    onApply(generated)
-    setMsg('現在の設定に反映しました（「設定を保存」で確定）')
-  }
+  const apply = () => onApply(generated)
 
   return (
     <div className="card">
@@ -61,16 +58,13 @@ export default function ScenarioSurveyCard({ base, onSave, onApply, saving }: Pr
         <HelpTip title="アンケートについて">
           いくつかの質問に答えるだけで、ライフプランの設定一式（子供・学校・車・住まい・運用・インフレなど）を
           自動で組み立てます。
-          <br />答えた項目だけが変わり、<b>大人の収入など今の設定は引き継ぎ</b>ます。
-          <br />作成前に必ず内容をプレビューできます。「シナリオとして保存」なら今の設定は変わりません。
+          <br />答えた項目だけが変わり、<b>大人の収入などの土台は引き継ぎ</b>ます。
+          <br />作成前に必ず内容をプレビューできます。
           <br />「税金が上がる」の回答は、手取りの伸び（昇給率）を鈍らせる形で反映しています。
         </HelpTip>
       </h2>
 
-      {!open ? (
-        <button className="btn secondary" onClick={() => setOpen(true)}>アンケートを開く</button>
-      ) : (
-        <>
+      <>
           <div className="seg">
             <button className={mode === 'simple' ? 'on' : ''} onClick={() => switchMode('simple')}>簡易版（7問）</button>
             <button className={mode === 'detail' ? 'on' : ''} onClick={() => switchMode('detail')}>詳細版（12問）</button>
@@ -106,17 +100,16 @@ export default function ScenarioSurveyCard({ base, onSave, onApply, saving }: Pr
           </div>
 
           <div style={{ display: 'flex', gap: 6, alignItems: 'end', marginTop: 10 }}>
-            <label className="field" style={{ marginBottom: 0, flex: 1 }}>この内容をシナリオとして保存
+            <label className="field" style={{ marginBottom: 0, flex: 1 }}>シナリオ名を付けて作成
               <input type="text" placeholder="例: 子供2人・私立コース" value={name} onChange={(e) => setName(e.target.value)} /></label>
             <button className="btn small" style={{ width: 'auto', marginBottom: 2 }} disabled={saving || !name.trim()} onClick={() => void save()}>
               {saving ? '保存中…' : '作成'}
             </button>
           </div>
-          <button className="btn secondary" style={{ marginTop: 8 }} onClick={apply}>現在の設定に反映する</button>
-          <button className="btn secondary" style={{ marginTop: 8 }} onClick={() => { setOpen(false); setMsg('') }}>閉じる</button>
+          <button className="btn secondary" style={{ marginTop: 8 }} onClick={apply}>この内容を編集画面で調整する</button>
+          <button className="btn secondary" style={{ marginTop: 8 }} onClick={onCancel}>キャンセル</button>
           {msg && <p className="pos center" style={{ margin: '8px 0 0' }}>{msg}</p>}
-        </>
-      )}
+      </>
     </div>
   )
 }

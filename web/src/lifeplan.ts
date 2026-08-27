@@ -71,7 +71,7 @@ export const DEFAULT_HOME: HomePlan = {
 export interface LifeplanConfig {
   inflation: number // %（実質インフレ率）
   invest_return: number // %（運用利回り。投資分にのみ複利で適用）
-  invest_ratio: number // %（毎年の収入のうち投資へ回す割合。0=これまでどおり黒字は全額現金に積む）
+  invest_ratio: number // %（毎年の収入のうち投資へ回す割合。その年の黒字の範囲まで。0=黒字は全額現金に積む）
   raise_rate: number // %（昇給率）
   pension_growth: number // %（年金の上昇率。0=受給額は現在の額のまま。物価連動にするならインフレ率と同値）
   living_cost: number | null // 基本生活費（年額・現在価格・子供費用を除く）。null=実支出から自動推定
@@ -267,6 +267,10 @@ export function planHighlights(rows: LifeplanRow[], cfg: LifeplanConfig): PlanHi
 export interface LifeEvent {
   year: number
   label: string
+  /** 対象者（大人の名前 or 「子N」）。住宅・資産など世帯共通のイベントは null */
+  who: string | null
+  /** 対象者の生年（カッコ内の年齢表示用）。共通イベントは null */
+  birthYear: number | null
 }
 
 /**
@@ -275,28 +279,29 @@ export interface LifeEvent {
  */
 export function lifeEvents(cfg: LifeplanConfig, result: LifeplanResult, startYear: number = new Date().getFullYear()): LifeEvent[] {
   const out: LifeEvent[] = []
-  const push = (year: number, label: string) => {
-    if (year >= startYear && year <= startYear + 80) out.push({ year, label })
+  const push = (year: number, label: string, who: string | null = null, birthYear: number | null = null) => {
+    if (year >= startYear && year <= startYear + 80) out.push({ year, label, who, birthYear })
   }
 
   cfg.children.forEach((c, i) => {
     const who = `子${i + 1}`
-    push(c.birth_year, `${who} 誕生`)
-    push(c.birth_year + 6, `${who} 小学校入学（${c.elementary}）`)
-    push(c.birth_year + 12, `${who} 中学校入学（${c.junior}）`)
-    push(c.birth_year + 15, `${who} 高校入学（${c.high}）`)
+    const at = (age: number, label: string) => push(c.birth_year + age, label, who, c.birth_year)
+    at(0, `${who} 誕生`)
+    at(6, `${who} 小学校入学（${c.elementary}）`)
+    at(12, `${who} 中学校入学（${c.junior}）`)
+    at(15, `${who} 高校入学（${c.high}）`)
     if (c.path === '高卒') {
-      push(c.birth_year + 18, `${who} 高校卒業`)
+      at(18, `${who} 高校卒業`)
     } else {
-      push(c.birth_year + 18, `${who} 大学入学（${c.college}・${c.living}）`)
-      push(c.birth_year + (c.path === '大学院' ? 24 : 22), `${who} ${c.path === '大学院' ? '大学院' : '大学'}卒業`)
+      at(18, `${who} 大学入学（${c.college}・${c.living}）`)
+      at(c.path === '大学院' ? 24 : 22, `${who} ${c.path === '大学院' ? '大学院' : '大学'}卒業`)
     }
   })
 
   for (const a of cfg.adults) {
     if (!a.birth_year) continue
-    if (a.income_enabled) push(a.birth_year + a.retire_age, `${a.name} 退職（${a.retire_age}歳）`)
-    push(a.birth_year + a.pension_start, `${a.name} 年金受給開始（${a.pension_start}歳）`)
+    if (a.income_enabled) push(a.birth_year + a.retire_age, `${a.name} 退職（${a.retire_age}歳）`, a.name, a.birth_year)
+    push(a.birth_year + a.pension_start, `${a.name} 年金受給開始（${a.pension_start}歳）`, a.name, a.birth_year)
   }
 
   if (cfg.home?.enabled) {
@@ -394,10 +399,18 @@ export function simulate(
     // 投資分は運用利回りで複利成長。年間収支の黒字/赤字は現金（liquid）で調整
     invest *= 1 + cfg.invest_return / 100
     liquid += income - expense
-    // 収入の一定割合を投資へ振り替える（手元現金の範囲内。総資産は変わらず配分だけが変わる）
-    const toInvest = Math.min(income * ((cfg.invest_ratio ?? 0) / 100), Math.max(0, liquid))
+    // 収入の一定割合を投資へ振り替える。あくまで「その年の黒字」の範囲で行うので、
+    // 赤字の年は投資に回さない（借金して投資する形にならない）
+    const surplus = income - expense
+    const toInvest = Math.min(income * ((cfg.invest_ratio ?? 0) / 100), Math.max(0, surplus), Math.max(0, liquid))
     invest += toInvest
     liquid -= toInvest
+    // 現金が足りない年は投資を取り崩して充てる（実際の家計と同じ動き）。振替なので総資産は変わらない
+    if (liquid < 0 && invest > 0) {
+      const withdraw = Math.min(-liquid, invest)
+      invest -= withdraw
+      liquid += withdraw
+    }
     const assets = invest + liquid
     if (assets < 0 && depletionYear === null) depletionYear = year
 

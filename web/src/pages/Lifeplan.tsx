@@ -21,7 +21,7 @@ import LifeplanEditor from './LifeplanEditor'
 import ScenarioSurveyCard from './ScenarioSurveyCard'
 import { useStore } from '../store'
 import { DEFAULT_PERSONS } from '../types'
-import { assetTotal, estimateLivingCost, parseBonusConfig, sortedAssets, yen, yenShort } from '../utils'
+import { assetTotal, estimateLivingCost, parseBonusConfig, parseProfile, sortedAssets, yen, yenShort } from '../utils'
 
 const thisYear = new Date().getFullYear()
 
@@ -205,7 +205,12 @@ export default function Lifeplan() {
   const updChild = (i: number, patch: Partial<LifeplanChild>) =>
     upd({ children: cfg.children.map((c, j) => (j === i ? { ...c, ...patch } : c)) })
 
-  const head = cfg.adults[0]
+  // 世帯主: 設定タブの控除プロフィールで選んだ人。未設定なら生年のある先頭の大人
+  const headPerson = parseProfile(data?.settings.find((x) => x.key === 'furusato_profile')?.value).head_person
+  const head =
+    cfg.adults.find((a) => a.name === headPerson && a.birth_year) ??
+    cfg.adults.find((a) => a.birth_year) ??
+    cfg.adults[0]
   const labels = result.rows.map((r) => {
     const age = head?.birth_year ? `(${r.year - head.birth_year})` : ''
     return `${r.year}${age}`
@@ -621,19 +626,28 @@ export default function Lifeplan() {
           <div style={{ overflowX: 'auto', maxHeight: 360, overflowY: 'auto' }}>
             <table style={{ fontSize: 12, borderCollapse: 'collapse', whiteSpace: 'nowrap', width: '100%' }}>
               <tbody>
-                {events.map((e, i) => (
-                  <tr key={`${e.year}-${i}`} style={{ borderTop: '1px solid var(--border)' }}>
-                    <td style={{ padding: 4, width: 82 }}>
-                      {e.year}
-                      {e.birthYear !== null ? <span className="muted">（{e.year - e.birthYear}）</span> : null}
-                    </td>
-                    <td style={{ padding: 4, color: eventColor(e) }}>{e.label}</td>
-                  </tr>
-                ))}
+                {events.map((e, i) => {
+                  const subjAge = e.birthYear !== null ? e.year - e.birthYear : null
+                  const headAge = head?.birth_year ? e.year - head.birth_year : null
+                  const subjIsHead = e.who !== null && e.who === head?.name
+                  return (
+                    <tr key={`${e.year}-${i}`} style={{ borderTop: '1px solid var(--border)' }}>
+                      <td style={{ padding: 4, width: 54 }}>{e.year}</td>
+                      <td style={{ padding: 4, whiteSpace: 'nowrap' }}>
+                        {subjAge !== null && <span style={{ color: eventColor(e) }}>{e.who} {subjAge}</span>}
+                        {subjAge !== null && headAge !== null && !subjIsHead && <span className="muted"> / </span>}
+                        {headAge !== null && !subjIsHead && <span className="muted">{head.name} {headAge}</span>}
+                      </td>
+                      <td style={{ padding: 4, color: eventColor(e) }}>{e.label}</td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
-          <p className="muted" style={{ fontSize: 11, margin: '4px 0 0' }}>カッコ内は年齢</p>
+          <p className="muted" style={{ fontSize: 11, margin: '4px 0 0' }}>
+            年齢は「対象者{head?.birth_year ? ` / 世帯主（${head.name}）` : ''}」の順。世帯主は設定タブの控除プロフィールで選んだ人です
+          </p>
         </div>
       )}
 

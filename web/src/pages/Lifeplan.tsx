@@ -78,14 +78,14 @@ export default function Lifeplan() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, scenarios, persons])
 
-  // 表示範囲バーがヘッダーに貼り付いたら、直接入力の1行だけに縮める（グラフの領域を稼ぐ）。
-  // バー自身ではなく直前のセンチネルを見るのは、縮むとバーの高さが変わって判定が振動するため。
+  // 表示範囲バーが画面上に消えきったら、入力欄だけの細いバーを画面上部に固定表示する。
+  // 固定バーは position:fixed で流し込みに参加しないので、切り替わってもページの中身は動かない。
   // --header-h は App.tsx が実測して入れている。スクロール中の再計算は避けて resize 時だけ読む。
-  const stickRef = useRef<HTMLDivElement | null>(null)
+  const barRef = useRef<HTMLDivElement | null>(null)
   const headerHRef = useRef(0)
   const checkStuck = () => {
-    const el = stickRef.current
-    if (el) setRangeStuck(el.getBoundingClientRect().top <= headerHRef.current + 0.5)
+    const el = barRef.current
+    if (el) setRangeStuck(el.getBoundingClientRect().bottom <= headerHRef.current)
   }
   useEffect(() => {
     const measure = () => {
@@ -299,6 +299,20 @@ export default function Lifeplan() {
     setMaxAge(c)
     setMaxAgeText(String(c))
   }
+  // 表示範囲の入力欄。カードと固定バーの両方に出るので、クランプ処理ごとここで1つにまとめる
+  const rangeInputField = (compact: boolean) => (
+    <label className={compact ? 'field range-input compact' : 'field range-input'} style={{ marginBottom: 0, flex: '1 1 150px' }}>
+      {compact ? '表示範囲' : headAgeNow !== null ? `直接入力（${rangeMin}〜${rangeMax}歳）` : `直接入力（1〜80年後）`}
+      <input type="text" inputMode="numeric" value={maxAgeText}
+        onChange={(e) => {
+          setMaxAgeText(e.target.value)
+          const n = Number(e.target.value)
+          if (e.target.value.trim() !== '' && Number.isFinite(n)) setMaxAge(clampRange(n))
+        }}
+        onBlur={(e) => applyRange(Number(e.target.value) || maxAge)} />
+      {compact && <span className="unit">{headAgeNow !== null ? '歳まで' : '年後まで'}</span>}
+    </label>
+  )
   const maxIdx = Math.max(1, Math.min(80, headAgeNow !== null ? maxAge - headAgeNow : maxAge))
   const viewRows = rA.rows.slice(0, maxIdx + 1)
   const viewRowsB = resultB ? resultB.rows.slice(0, maxIdx + 1) : null
@@ -624,26 +638,16 @@ export default function Lifeplan() {
       </div>
       </details>
 
-      {/* グラフの表示範囲。ホームの期間バーと同じくヘッダー直下に貼り付いて追従するが、
-          貼り付いている間は「直接入力」1行に縮める（.slim）。センチネルで貼り付きを検知する */}
-      <div ref={(el) => { stickRef.current = el; if (el) checkStuck() }} />
-      <div className={rangeStuck ? 'card period-picker slim' : 'card period-picker'}>
+      {/* グラフの表示範囲。カードは貼り付かせず普通に流し、上に消えきったら
+          入力欄だけの細いバー（.range-fixed）を画面上部に固定表示する */}
+      <div ref={(el) => { barRef.current = el; if (el) checkStuck() }} className="card range-bar">
         <div className="seg" style={{ flexWrap: 'wrap' }}>
           {rangePresets.map((p) => (
             <button key={p.value} style={{ flex: '1 0 22%' }} className={maxAge === p.value ? 'on' : ''} onClick={() => applyRange(p.value)}>{p.label}</button>
           ))}
         </div>
         <div className="range-row" style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap' }}>
-          <label className="field range-input" style={{ marginBottom: 0, flex: '1 1 150px' }}>
-            {rangeStuck ? '表示範囲' : headAgeNow !== null ? `直接入力（${rangeMin}〜${rangeMax}歳）` : `直接入力（1〜80年後）`}
-            <input type="text" inputMode="numeric" value={maxAgeText}
-              onChange={(e) => {
-                setMaxAgeText(e.target.value)
-                const n = Number(e.target.value)
-                if (e.target.value.trim() !== '' && Number.isFinite(n)) setMaxAge(clampRange(n))
-              }}
-              onBlur={(e) => applyRange(Number(e.target.value) || maxAge)} />
-            <span className="unit">{headAgeNow !== null ? '歳まで' : '年後まで'}</span></label>
+          {rangeInputField(false)}
           {head?.birth_year && (
             <label className="field bench-toggle" style={{ marginBottom: 0, flex: '1 1 170px' }}>
               <input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={showBenchmark} onChange={(e) => setShowBenchmark(e.target.checked)} />
@@ -656,6 +660,10 @@ export default function Lifeplan() {
           {head?.birth_year ? `（${head.name} ${thisYear - head.birth_year}〜${thisYear + maxIdx - head.birth_year}歳）` : ''}
           ／ 5年ごとのサマリとライフイベント年表は全期間のまま
         </p>
+      </div>
+
+      <div className={rangeStuck ? 'range-fixed show' : 'range-fixed'} aria-hidden={!rangeStuck}>
+        <div className="card range-bar">{rangeInputField(true)}</div>
       </div>
 
       <div className="card">

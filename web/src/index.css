@@ -370,46 +370,58 @@ button {
   box-shadow: 0 6px 12px -6px rgba(0, 0, 0, 0.6);
 }
 
-/* プランの表示範囲バーは、ヘッダーに貼り付いている間だけ「直接入力」1行に縮める。
-   プリセットが2段に折り返すぶん、そのままだとグラフの領域を大きく削ってしまうため。
-   要素はJSXから消さずCSSで隠すので、入力中のフォーカスと入力値はそのまま保たれる。 */
-.period-picker.slim {
+/* プランの表示範囲: 全部入りのカードは貼り付かせず普通に流し、上に消えきったら
+   入力欄だけのバーを画面上部に固定する。position:fixed で流し込みに参加しないので、
+   切り替わってもページの中身が動かない（sticky のまま縮めると下の内容が跳ねる）。
+   固定位置の指定は .tabbar に倣う。 */
+.range-fixed {
+  position: fixed;
+  top: var(--header-h);
+  left: 0;
+  right: 0;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 0 12px; /* .main の左右パディングに合わせる */
+  z-index: 9; /* ヘッダー/タブバー(10)より下・カードより上 */
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-6px);
+  transition: opacity 0.14s ease, transform 0.14s ease, visibility 0.14s;
+  pointer-events: none;
+}
+
+.range-fixed.show {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  pointer-events: auto;
+}
+
+.range-fixed .card {
+  margin-bottom: 0;
   padding: 8px 14px;
+  box-shadow: 0 6px 12px -6px rgba(0, 0, 0, 0.6);
 }
 
-.period-picker.slim > *:not(.range-row),
-.period-picker.slim .range-row > *:not(.range-input) {
-  display: none;
-}
-
-/* 比較トグルの display は CSS 側に置く。インライン style だと上の display:none に勝ってしまうため */
-.period-picker .bench-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.period-picker.slim .range-input {
+/* 固定バー用の1行版（表示範囲 [100] 歳まで） */
+.range-input.compact {
   display: flex;
   align-items: center;
   gap: 8px;
   margin: 0;
 }
 
-.period-picker.slim .range-input input {
+.range-input.compact input {
   width: 5em;
   margin-top: 0;
   padding: 6px 8px;
   text-align: center;
 }
 
-/* 「歳まで」は縮小時だけ添える */
-.period-picker .unit {
-  display: none;
-}
-
-.period-picker.slim .unit {
-  display: inline;
+.range-bar .bench-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* ホームのグラフ折りたたみセクション */

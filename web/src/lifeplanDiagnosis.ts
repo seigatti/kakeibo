@@ -7,6 +7,7 @@
  */
 import { getConst } from './constants.ts'
 import type { LifeplanConfig, LifeplanResult } from './lifeplan.ts'
+import { isMasked } from './utils.ts'
 
 export interface DiagnosisFactor {
   key: string
@@ -16,8 +17,10 @@ export interface DiagnosisFactor {
   standard: string
   /** 現在の設定が標準より厳しい側か */
   harsher: boolean
-  /** 標準に合わせたときの80年後資産の差（プラス=改善） */
+  /** 標準に合わせたときの評価年の資産の差（名目・プラス=改善） */
   deltaAssets: number
+  /** 同じ差を「今の価値」（インフレで割り戻した実質）で見たもの */
+  deltaAssetsReal: number
   depletionBefore: number | null
   depletionAfter: number | null
   /** なぜその値が標準なのかの一文 */
@@ -28,10 +31,20 @@ export interface DiagnosisFactor {
 
 export interface Diagnosis {
   depletionYear: number | null
-  /** 標準より厳しい前提を、影響の大きい順に並べたもの */
+  /** 実際に評価した年（世帯主が80歳になる年など。UIのラベル用） */
+  evalYear: number
+  /** 評価年の資産（名目・実質） */
+  baseAssets: number
+  baseAssetsReal: number
+  /** 標準より厳しい前提を、影響（今の価値）の大きい順に並べたもの */
   factors: DiagnosisFactor[]
   /** 厳しい前提をすべて標準にそろえた場合 */
-  allStandard: { depletionYear: number | null; deltaAssets: number; patch: Partial<LifeplanConfig> } | null
+  allStandard: {
+    depletionYear: number | null
+    deltaAssets: number
+    deltaAssetsReal: number
+    patch: Partial<LifeplanConfig>
+  } | null
 }
 
 export interface DiagnosisContext {
@@ -39,11 +52,14 @@ export interface DiagnosisContext {
   pensionEstimate: Record<string, number>
   /** 実支出からの基本生活費の推定（年額）。無ければ null */
   livingEstimate: number | null
+  /** 影響を測る年（例: 世帯主が80歳になる年）。未指定・範囲外なら最終年で評価する */
+  evalYear?: number
 }
 
 const pct = (v: number) => `${Math.round(v * 10) / 10}%`
 const round1 = (v: number) => Math.round(v * 10) / 10
-const man = (v: number) => `${Math.round(v / 10_000).toLocaleString('ja-JP')}万円`
+/** 万円表示（金額マスクに対応） */
+const man = (v: number) => (isMasked() ? '＊＊＊万円' : `${Math.round(v / 10_000).toLocaleString('ja-JP')}万円`)
 
 /** 候補（標準より厳しいときだけ診断対象にする） */
 interface Candidate {
@@ -184,27 +200,36 @@ function candidates(cfg: LifeplanConfig, ctx: DiagnosisContext): Candidate[] {
  * @param run 同じ開始資産・収入前提でシミュレートするクロージャ（呼び出し側が注入）
  */
 export function diagnoseScenario(cfg: LifeplanConfig, run: (c: LifeplanConfig) => LifeplanResult, ctx: DiagnosisContext): Diagnosis {
+  // 評価する行（既定は最終年。evalYear があればその年）
+  const pick = (r: LifeplanResult) =>
+    (ctx.evalYear !== undefined ? r.rows.find((x) => x.year === ctx.evalYear) : undefined) ?? r.rows[r.rows.length - 1]
+
   const baseResult = run(cfg)
-  const baseAssets = baseResult.rows[baseResult.rows.length - 1].assetsNominal
+  const baseRow = pick(baseResult)
+  const baseAssets = baseRow.assetsNominal
+  const baseAssetsReal = baseRow.assetsReal
   const depletionBefore = baseResult.depletionYear
 
   const harsh = candidates(cfg, ctx).filter((c) => c.harsher)
   const factors: DiagnosisFactor[] = harsh.map((c) => {
     const r = run({ ...cfg, ...c.patch })
+    const row = pick(r)
     return {
       key: c.key,
       label: c.label,
       current: c.current,
       standard: c.standard,
       harsher: true,
-      deltaAssets: r.rows[r.rows.length - 1].assetsNominal - baseAssets,
+      deltaAssets: row.assetsNominal - baseAssets,
+      deltaAssetsReal: row.assetsReal - baseAssetsReal,
       depletionBefore,
       depletionAfter: r.depletionYear,
       why: c.why,
       patch: c.patch,
     }
   })
-  factors.sort((a, b) => b.deltaAssets - a.deltaAssets)
+  // インフレ率を戻す要因は名目と実質で効き方が違うので「今の価値」で並べる
+  factors.sort((a, b) => b.deltaAssetsReal - a.deltaAssetsReal)
 
   let allStandard: Diagnosis['allStandard'] = null
   if (harsh.length > 0) {
@@ -218,12 +243,14 @@ export function diagnoseScenario(cfg: LifeplanConfig, run: (c: LifeplanConfig) =
     // adults を触る patch が複数あると後勝ちになるため、最終状態から作り直す
     merged = { ...merged, adults: acc.adults }
     const r = run(acc)
+    const row = pick(r)
     allStandard = {
       depletionYear: r.depletionYear,
-      deltaAssets: r.rows[r.rows.length - 1].assetsNominal - baseAssets,
+      deltaAssets: row.assetsNominal - baseAssets,
+      deltaAssetsReal: row.assetsReal - baseAssetsReal,
       patch: merged,
     }
   }
 
-  return { depletionYear: depletionBefore, factors, allStandard }
+  return { depletionYear: depletionBefore, evalYear: baseRow.year, baseAssets, baseAssetsReal, factors, allStandard }
 }

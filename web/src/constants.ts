@@ -93,7 +93,7 @@ export const CONSTANTS: ConstDef[] = [
 
   // ---- ライフプランの標準値（「前提の厳しさ診断」の比較基準。設定タブで変更可） ----
   { key: 'std_inflation', group: 'ライフプランの標準値', label: '標準のインフレ率', unit: '%', default: 2, source: SRC.boj, reviewYear: 2026, annual: false, note: '日銀の物価安定の目標' },
-  { key: 'pension_slide', group: 'ライフプランの標準値', label: '年金のマクロスライド調整（物価上昇率からの差引）', unit: '%', default: 0.3, source: SRC.mhlw_kensho, reviewYear: 2026, annual: false, note: '年金の上昇率の標準 = インフレ率 − この値' },
+  { key: 'pension_slide', group: 'ライフプランの標準値', label: '年金のマクロスライド調整（物価上昇率からの差引）', unit: '%', default: 0.9, source: SRC.mhlw_kensho, reviewYear: 2026, annual: false, note: '年金の上昇率の標準 = インフレ率 − この値。直近の実績は年0.3〜0.4%程度だが、調整期間が数十年続き所得代替率が下がる前提を踏まえ、長期の標準として保守的に0.9%（被保険者数の減少0.6%＋平均余命の伸び0.3%）を採用' },
   { key: 'living_retire_ratio', group: 'ライフプランの標準値', label: '退職後の基本生活費の割合（現役期比）', unit: '%', default: 70, source: SRC.kakei, reviewYear: 2026, annual: false, note: '高齢無職世帯の消費支出は現役期より小さい' },
   { key: 'std_invest_return', group: 'ライフプランの標準値', label: '標準の運用利回り', unit: '%', default: 3, source: SRC.boj, reviewYear: 2026, annual: false, note: '長期分散投資の控えめな目安' },
   { key: 'std_invest_ratio', group: 'ライフプランの標準値', label: '標準の「収入のうち投資へ回す割合」', unit: '%', default: 20, source: SRC.kakei, reviewYear: 2026, annual: false },

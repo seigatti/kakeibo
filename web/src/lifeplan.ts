@@ -101,7 +101,7 @@ export const DEFAULT_LIFEPLAN: LifeplanConfig = {
   shortfall_cover: true,
   cash_floor: 0,
   raise_rate: 1.0,
-  pension_growth: 1.7, // 標準インフレ2% − マクロスライド0.3%（物価にほぼ連動して改定される前提）
+  pension_growth: 1.1, // 標準インフレ2% − マクロスライド0.9%（物価連動だが調整で少し目減りする前提）
   living_cost: null,
   living_cost_retire_ratio: 100,
   child_multiplier: 1.0,

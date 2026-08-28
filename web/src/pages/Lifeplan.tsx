@@ -352,8 +352,16 @@ export default function Lifeplan() {
     {
       pensionEstimate: Object.fromEntries(cfg.adults.map((a) => [a.name, pensionEstOf(a)])),
       livingEstimate: livingEstimate?.annual ?? null,
+      // 世帯主が80歳になる年で影響を測る（80年後だと死後数十年の複利まで含んで差が過大に見えるため）
+      evalYear:
+        head?.birth_year && head.birth_year + 80 >= thisYear && head.birth_year + 80 <= thisYear + 80
+          ? head.birth_year + 80
+          : undefined,
     },
   )
+  const evalLabel = head?.birth_year && diagnosis.evalYear === head.birth_year + 80
+    ? `${head.name}が80歳になる${diagnosis.evalYear}年時点`
+    : `${diagnosis.evalYear}年時点`
 
   // 年表の色分け。暗い背景で読みやすい定番色を対象者ごとに固定順で割り当てる
   const ADULT_COLORS = ['#38bdf8', '#4ade80']
@@ -495,13 +503,18 @@ export default function Lifeplan() {
           <span className={rA.depletionYear !== null ? 'neg' : 'pos'}>{rA.depletionYear ?? 'なし'}</span></div>
       </div>
 
-      <div className="card">
+      <details className="graph-section">
+        <summary>🔍 前提の厳しさ診断: {nameA}</summary>
+
+        <div className="card">
         <h2>
-          前提の厳しさ診断: {nameA}
+          評価時点: {evalLabel}
           <HelpTip title="この診断について">
             シナリオの前提を1つずつ「一般的な標準値」に戻して80年分を計算し直し、
             <b>その前提が結果をどれだけ悪くしているか</b>を実測しています。
             <br />標準値は設定タブの「計算の基準値 → ライフプランの標準値」で変更でき、出典も確認できます。
+            <br />影響は <b>{evalLabel}</b> の資産で測っています（80年後まで見ると死後数十年ぶんの複利まで含まれ、差が過大に見えるため）。
+            <br />「今の価値」はインフレで割り戻した実質の金額です。
             <br />「標準に合わせる」を押すと、その値を当てた状態で編集画面が開きます（すぐには保存されません）。
           </HelpTip>
         </h2>
@@ -515,7 +528,8 @@ export default function Lifeplan() {
                 <>
                   {' '}すべて標準に合わせると 枯渇 {diagnosis.depletionYear ?? 'なし'} →{' '}
                   <b className="pos">{diagnosis.allStandard.depletionYear ?? 'なし'}</b>
-                  （80年後 {diagnosis.allStandard.deltaAssets >= 0 ? '+' : ''}{yen(diagnosis.allStandard.deltaAssets)}）
+                  （{evalLabel} {diagnosis.allStandard.deltaAssets >= 0 ? '+' : ''}{yen(diagnosis.allStandard.deltaAssets)}
+                  {' / '}今の価値で {diagnosis.allStandard.deltaAssetsReal >= 0 ? '+' : ''}{yen(diagnosis.allStandard.deltaAssetsReal)}）
                 </>
               )}
             </p>
@@ -523,7 +537,10 @@ export default function Lifeplan() {
               <div key={f.key} style={{ borderTop: '1px solid var(--border)', paddingTop: 8, marginBottom: 8 }}>
                 <div className="kv" style={{ alignItems: 'baseline' }}>
                   <span><b>{f.label}</b> <span className="muted" style={{ fontSize: 12 }}>{f.current} → {f.standard}</span></span>
-                  <b className="pos">+{yen(f.deltaAssets)}</b>
+                  <span style={{ textAlign: 'right' }}>
+                    <b className="pos">+{yen(f.deltaAssets)}</b>
+                    <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>今の価値 +{yen(f.deltaAssetsReal)}</span>
+                  </span>
                 </div>
                 <p className="muted" style={{ fontSize: 11, margin: '2px 0 4px' }}>
                   {f.depletionBefore !== null && (
@@ -548,6 +565,7 @@ export default function Lifeplan() {
           </>
         )}
       </div>
+      </details>
 
       <div className="card">
         <h2>

@@ -316,6 +316,7 @@ export default function Lifeplan() {
       <ScenarioSurveyCard
         base={cfg}
         saving={saving}
+        livingEstimate={livingEstimate}
         onSave={async (name, generated) => {
           const exists = scenarios.some((x) => x.name === name)
           const next = exists

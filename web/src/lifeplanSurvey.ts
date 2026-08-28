@@ -21,6 +21,8 @@ export interface SurveyQuestion {
   question: string
   /** both=両方 / simple=簡易版だけの「方針」質問 / detail=詳細版だけ */
   mode: 'both' | 'simple' | 'detail'
+  /** 既定の回答（省略時は先頭の選択肢） */
+  defaultValue?: string
   options: SurveyOption[]
 }
 
@@ -107,23 +109,41 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
   },
   {
     id: 'school',
-    question: '子供の学校はどう想定しますか？',
+    question: '小・中・高はどこから私立に通う想定ですか？',
     mode: 'detail',
     options: [
-      { value: 'public', label: 'すべて公立', note: '大学も国公立' },
-      { value: 'mixed', label: '公立中心・大学は私立' },
-      { value: 'private', label: '中学から私立', note: '大学も私立' },
+      { value: 'public', label: 'すべて公立' },
+      { value: 'high', label: '高校から私立', note: '小・中は公立' },
+      { value: 'junior', label: '中学から私立', note: '小学校は公立' },
+    ],
+  },
+  {
+    id: 'college',
+    question: '大学は国公立・私立のどちらを想定しますか？',
+    mode: 'detail',
+    options: [
+      { value: 'public', label: '国公立' },
+      { value: 'private', label: '私立' },
     ],
   },
   {
     id: 'course',
-    question: '子供の進路と住まいは？',
+    question: '子供はどこまで進学する想定ですか？',
+    mode: 'detail',
+    defaultValue: 'univ',
+    options: [
+      { value: 'high', label: '高校まで' },
+      { value: 'univ', label: '大学まで' },
+      { value: 'grad', label: '大学院まで' },
+    ],
+  },
+  {
+    id: 'child_living',
+    question: '大学以降の住まいは？',
     mode: 'detail',
     options: [
-      { value: 'high', label: '高卒まで' },
-      { value: 'univ_home', label: '大学・実家から' },
-      { value: 'univ_alone', label: '大学・一人暮らし' },
-      { value: 'grad', label: '大学院まで', note: '一人暮らし想定' },
+      { value: 'home', label: '実家から通う' },
+      { value: 'alone', label: '一人暮らし', note: '生活費の加算あり' },
     ],
   },
   {
@@ -318,9 +338,9 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
 /** 方針の回答 → 詳細質問の回答。ここを変えれば画面の説明（answerEffects）も自動で追従する */
 export const POLICY_MAP: Record<string, Record<string, SurveyAnswers>> = {
   policy_education: {
-    public: { school: 'public', course: 'univ_home' },
-    mixed: { school: 'mixed', course: 'univ_alone' },
-    best: { school: 'private', course: 'grad' },
+    public: { school: 'public', college: 'public', course: 'univ', child_living: 'home' },
+    mixed: { school: 'high', college: 'private', course: 'univ', child_living: 'alone' },
+    best: { school: 'junior', college: 'private', course: 'grad', child_living: 'alone' },
   },
   policy_money: {
     saver: { invest_ratio: '30', living: '3000000', standard: 'standard', style: '3' },
@@ -351,7 +371,19 @@ const findQ = (id: string) => SURVEY_QUESTIONS.find((q) => q.id === id)
  * 方針の質問は POLICY_MAP を引いて「詳細質問 → 選択肢」を並べるので、
  * 対応表を変えれば説明も自動で追従する（手書きの説明とズレない）。
  */
-export function answerEffects(questionId: string, value: string): string[] {
+export interface EffectContext {
+  /** 実支出からの基本生活費の推定（「実績から自動」の実額表示に使う） */
+  livingEstimate?: { annual: number; months: number } | null
+}
+
+export function answerEffects(questionId: string, value: string, ctx?: EffectContext): string[] {
+  // 「実績から自動」は実際にいくらで計算されるかを出す
+  if (questionId === 'living' && value === 'auto') {
+    const e = ctx?.livingEstimate
+    return e && e.annual > 0
+      ? [`直近${e.months}ヶ月の実支出から推定: 約${Math.round(e.annual / 10_000).toLocaleString('ja-JP')}万円/年`]
+      : ['実支出のデータが足りないため 0円 として計算されます（金額を選ぶこともできます）']
+  }
   const table = POLICY_MAP[questionId]?.[value]
   if (table) {
     return Object.entries(table).map(([qid, val]) => {
@@ -371,7 +403,7 @@ export const questionsFor = (mode: SurveyMode) =>
 /** その質問セットの既定回答（＝各質問の最初の選択肢） */
 export function defaultAnswers(mode: SurveyMode): SurveyAnswers {
   const out: SurveyAnswers = {}
-  for (const q of questionsFor(mode)) out[q.id] = q.options[0].value
+  for (const q of questionsFor(mode)) out[q.id] = q.defaultValue ?? q.options[0].value
   return out
 }
 
@@ -408,28 +440,33 @@ export function buildConfigFromAnswers(
     }))
   }
 
-  // 学校（全員に一括適用）
+  // 小・中・高（私立が始まる段階。大学は別の質問で決める）
   if (answers.school) {
-    const s = answers.school
+    const from = ({ public: 99, high: 2, junior: 1 } as Record<string, number>)[answers.school] ?? 99 // 1=中学 2=高校
     cfg.children = cfg.children.map((c) => ({
       ...c,
-      elementary: s === 'private' ? '私立' : '公立',
-      junior: s === 'private' ? '私立' : '公立',
-      high: s === 'public' ? '公立' : '私立',
-      college: s === 'public' ? '国公立' : '私立',
+      elementary: '公立',
+      junior: from <= 1 ? '私立' : '公立',
+      high: from <= 2 ? '私立' : '公立',
     }))
   }
 
-  // 進路と住まい
+  // 大学（国公立 / 私立）
+  if (answers.college) {
+    const college: LifeplanChild['college'] = answers.college === 'private' ? '私立' : '国公立'
+    cfg.children = cfg.children.map((c) => ({ ...c, college }))
+  }
+
+  // どこまで進学するか
   if (answers.course) {
-    const map: Record<string, Pick<LifeplanChild, 'path' | 'living'>> = {
-      high: { path: '高卒', living: '実家' },
-      univ_home: { path: '大卒', living: '実家' },
-      univ_alone: { path: '大卒', living: '一人暮らし' },
-      grad: { path: '大学院', living: '一人暮らし' },
-    }
-    const m = map[answers.course]
-    if (m) cfg.children = cfg.children.map((c) => ({ ...c, ...m }))
+    const path = ({ high: '高卒', univ: '大卒', grad: '大学院' } as Record<string, LifeplanChild['path']>)[answers.course]
+    if (path) cfg.children = cfg.children.map((c) => ({ ...c, path }))
+  }
+
+  // 大学以降の住まい
+  if (answers.child_living) {
+    const living: LifeplanChild['living'] = answers.child_living === 'alone' ? '一人暮らし' : '実家'
+    cfg.children = cfg.children.map((c) => ({ ...c, living }))
   }
 
   // カスタム収支（車・介護）はアンケート管理分を入れ直す（手入力した他の項目は残す）

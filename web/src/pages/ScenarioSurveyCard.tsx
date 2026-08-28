@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import HelpTip from '../components/HelpTip'
-import { scenarioSummary, type LifeplanConfig } from '../lifeplan'
+import { scenarioSummaryRows, type LifeplanConfig } from '../lifeplan'
 import {
   answerEffects,
   buildConfigFromAnswers,
@@ -20,6 +20,8 @@ interface Props {
   onApply: (cfg: LifeplanConfig) => void
   /** 画面を閉じる */
   onCancel: () => void
+  /** 実支出からの基本生活費の推定（「実績から自動」の実額表示に使う） */
+  livingEstimate?: { annual: number; months: number } | null
   saving?: boolean
 }
 
@@ -27,7 +29,7 @@ interface Props {
  * いくつかの選択式の質問に答えるだけでライフプランのシナリオを作るカード。
  * 生成結果は必ずプレビューしてから「保存」または「現在の設定に反映」を選ぶ。
  */
-export default function ScenarioSurveyCard({ base, onSave, onApply, onCancel, saving }: Props) {
+export default function ScenarioSurveyCard({ base, onSave, onApply, onCancel, livingEstimate, saving }: Props) {
   const [mode, setMode] = useState<SurveyMode>('simple')
   const [answers, setAnswers] = useState<SurveyAnswers>(() => defaultAnswers('simple'))
   const [name, setName] = useState('')
@@ -35,6 +37,10 @@ export default function ScenarioSurveyCard({ base, onSave, onApply, onCancel, sa
 
   const questions = useMemo(() => questionsFor(mode), [mode])
   const generated = useMemo(() => buildConfigFromAnswers(answers, base), [answers, base])
+  const previewRows = useMemo(
+    () => scenarioSummaryRows(generated, { livingEstimate: livingEstimate?.annual ?? null }),
+    [generated, livingEstimate],
+  )
 
   const switchMode = (m: SurveyMode) => {
     setMode(m)
@@ -100,7 +106,7 @@ export default function ScenarioSurveyCard({ base, onSave, onApply, onCancel, sa
                 ))}
               </div>
               {(() => {
-                const effects = answerEffects(q.id, answers[q.id])
+                const effects = answerEffects(q.id, answers[q.id], { livingEstimate })
                 if (effects.length === 0) return null
                 return (
                   <div className="muted" style={{ fontSize: 11, margin: '4px 0 0', lineHeight: 1.7 }}>
@@ -114,9 +120,17 @@ export default function ScenarioSurveyCard({ base, onSave, onApply, onCancel, sa
           ))}
 
           <h2 style={{ marginTop: 14 }}>できあがる設定（プレビュー）</h2>
-          <div style={{ fontSize: 12, lineHeight: 1.8, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 10 }}>
-            {scenarioSummary(generated).map((line, i) => (
-              <div key={i} className="muted">{line}</div>
+          <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '4px 10px 10px' }}>
+            {[...new Set(previewRows.map((r) => r.group))].map((g) => (
+              <div key={g} style={{ marginTop: 8 }}>
+                <div style={{ fontSize: 11, color: 'var(--accent)', borderBottom: '1px solid var(--border)', paddingBottom: 2, marginBottom: 4 }}>{g}</div>
+                {previewRows.filter((r) => r.group === g).map((r, i) => (
+                  <div className="kv" key={i} style={{ fontSize: 12, padding: '2px 0', gap: 12 }}>
+                    <span className="muted" style={{ flex: '0 0 auto' }}>{r.label}</span>
+                    <span style={{ textAlign: 'right' }}>{r.value}</span>
+                  </div>
+                ))}
+              </div>
             ))}
           </div>
 

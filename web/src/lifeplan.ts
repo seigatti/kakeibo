@@ -129,46 +129,81 @@ export function parseLifeplan(json: string | null | undefined): LifeplanConfig {
   }
 }
 
-/** シナリオの主要条件を短い行の配列に整形（読み込まずに中身を把握するためのプレビュー） */
-export function scenarioSummary(cfg: LifeplanConfig): string[] {
-  const lines: string[] = []
-  lines.push(`インフレ ${cfg.inflation}% / 利回り ${cfg.invest_return}% / 昇給 ${cfg.raise_rate}% / 年金上昇 ${cfg.pension_growth ?? 0}%`)
-  lines.push(`収入のうち投資へ回す割合: ${cfg.invest_ratio ?? 0}%`)
-  lines.push(
-    `取り崩し: ${
-      !cfg.withdraw_mode || cfg.withdraw_mode === 'none'
-        ? 'しない'
-        : `${cfg.withdraw_start_year}年から毎年${cfg.withdraw_mode === 'rate' ? `${cfg.withdraw_value}%` : yen(cfg.withdraw_value)}${(cfg.withdraw_skip_cash_ratio ?? 0) > 0 ? `（現金比率${cfg.withdraw_skip_cash_ratio}%以上なら見送り）` : ''}`
-    } / 現金不足時: ${
-      cfg.shortfall_cover === false
-        ? '補わない'
-        : `投資から補う${(cfg.cash_floor ?? 0) > 0 ? `（下限 ${yen(cfg.cash_floor)}）` : ''}`
-    }`,
+export interface SummaryRow {
+  group: string
+  label: string
+  value: string
+}
+
+const pctStr = (v: number) => `${Math.round(v * 10) / 10}%`
+
+/** シナリオの条件を「グループ・項目・値」に整形（プレビューや条件表示の単一の情報源） */
+export function scenarioSummaryRows(cfg: LifeplanConfig, opts?: { livingEstimate?: number | null }): SummaryRow[] {
+  const rows: SummaryRow[] = []
+  const add = (group: string, label: string, value: string) => rows.push({ group, label, value })
+
+  // ---- 前提 ----
+  add('前提', 'インフレ率', pctStr(cfg.inflation))
+  add('前提', '昇給率', `${pctStr(cfg.raise_rate)}（実質賃金 ${cfg.raise_rate - cfg.inflation >= 0 ? '+' : ''}${pctStr(cfg.raise_rate - cfg.inflation)}）`)
+  add('前提', '年金の上昇率', pctStr(cfg.pension_growth ?? 0))
+
+  // ---- 資産運用 ----
+  add('資産運用', '運用利回り', pctStr(cfg.invest_return))
+  add('資産運用', '収入のうち投資へ', pctStr(cfg.invest_ratio ?? 0))
+  add(
+    '資産運用',
+    '取り崩し',
+    !cfg.withdraw_mode || cfg.withdraw_mode === 'none'
+      ? 'しない'
+      : `${cfg.withdraw_start_year}年から毎年 ${cfg.withdraw_mode === 'rate' ? pctStr(cfg.withdraw_value) : yen(cfg.withdraw_value)}` +
+        ((cfg.withdraw_skip_cash_ratio ?? 0) > 0 ? `（現金比率${cfg.withdraw_skip_cash_ratio}%以上は見送り）` : ''),
   )
-  lines.push(`基本生活費: ${cfg.living_cost === null ? '実績から自動' : yen(cfg.living_cost)}（子供費用倍率 ${cfg.child_multiplier}）`)
-  if (cfg.adults.length) {
-    lines.push(
-      '大人: ' +
-        cfg.adults
-          .map((a) => `${a.name}${a.income_enabled ? '' : '(収入なし)'}${a.birth_year ? `・${a.birth_year}生` : ''}`)
-          .join(' / '),
-    )
+  add(
+    '資産運用',
+    '現金が不足したら',
+    cfg.shortfall_cover === false
+      ? '補わない'
+      : `投資から補う${(cfg.cash_floor ?? 0) > 0 ? `（現金の下限 ${yen(cfg.cash_floor)}）` : ''}`,
+  )
+
+  // ---- 生活費 ----
+  add(
+    '生活費',
+    '基本生活費',
+    cfg.living_cost === null
+      ? `実績から自動${opts?.livingEstimate ? `（約${yen(opts.livingEstimate)}/年）` : ''}`
+      : `${yen(cfg.living_cost)}/年`,
+  )
+  add('生活費', '退職後の生活費', `現役期の ${pctStr(cfg.living_cost_retire_ratio ?? 100)}`)
+  add('生活費', '子供費用の倍率', `${cfg.child_multiplier}倍`)
+
+  // ---- 家族 ----
+  for (const a of cfg.adults) {
+    add('家族', a.name, `${a.birth_year ? `${a.birth_year}年生・` : ''}${a.income_enabled ? '収入あり' : '収入なし'}・${a.retire_age}歳で退職`)
   }
-  if (cfg.children.length) {
-    lines.push(
-      `子供${cfg.children.length}人: ` +
-        cfg.children
-          .map((c) => `${c.birth_year}生・${c.path}${c.path !== '高卒' ? `(${c.college})` : ''}`)
-          .join(' / '),
-    )
-  }
+  cfg.children.forEach((c, i) => {
+    const school = c.junior === '私立' ? '中学から私立' : c.high === '私立' ? '高校から私立' : 'すべて公立'
+    const after = c.path === '高卒' ? '高卒' : `${c.path === '大学院' ? '大学院' : '大学'}(${c.college}・${c.living})`
+    add('家族', `子${i + 1}`, `${c.birth_year}年生・${school}・${after}`)
+  })
+
+  // ---- 住まい ----
   if (cfg.home?.enabled) {
-    lines.push(`マイホーム: ${cfg.home.buy_year}年に${yen(cfg.home.price)}（頭金${yen(cfg.home.down_payment)}・${cfg.home.interest_rate}%・${cfg.home.loan_years}年）`)
+    add('住まい', 'マイホーム購入', `${cfg.home.buy_year}年・${yen(cfg.home.price)}`)
+    add('住まい', 'ローン', `${yen(cfg.home.loan_amount)}・${cfg.home.interest_rate}%・${cfg.home.loan_years}年`)
   }
-  if (cfg.custom_flows.length) {
-    lines.push('カスタム収支: ' + cfg.custom_flows.map((f) => f.label || '（無名）').join('、'))
+
+  // ---- カスタム収支 ----
+  for (const f of cfg.custom_flows) {
+    add('カスタム収支', f.label || '（無名）', `${yen(f.annual)}/年・${f.start_year}〜${f.end_year}年`)
   }
-  return lines
+
+  return rows
+}
+
+/** シナリオの主要条件を1行ずつの文字列に（一覧の「条件」表示用）。rows から導出して二重管理を避ける */
+export function scenarioSummary(cfg: LifeplanConfig): string[] {
+  return scenarioSummaryRows(cfg).map((r) => `${r.label}: ${r.value}`)
 }
 
 // ローン計算は utils.ts に実装（負債管理と共用）。既存の import パスを保つため再エクスポート

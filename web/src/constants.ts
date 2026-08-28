@@ -9,7 +9,7 @@
  */
 
 export type ConstUnit = '円' | '%' | '歳' | '倍'
-export type ConstGroup = '年金（想定）' | '子供費用' | '児童手当' | 'マイホーム' | '税制・ふるさと納税'
+export type ConstGroup = '年金（想定）' | '子供費用' | '児童手当' | 'マイホーム' | '税制・ふるさと納税' | 'ライフプランの標準値'
 
 export interface ConstDef {
   key: string
@@ -34,6 +34,9 @@ const SRC = {
   nta_loan: { label: '国税庁「住宅借入金等特別控除」', url: 'https://www.nta.go.jp/taxes/shiraberu/taxanswer/shotoku/1213.htm' },
   nta_medical: { label: '国税庁「医療費控除」', url: 'https://www.nta.go.jp/taxes/shiraberu/taxanswer/shotoku/1120.htm' },
   home: { label: '（目安）住宅購入の諸費用・維持費の一般的水準', url: 'https://www.nta.go.jp/taxes/shiraberu/taxanswer/shotoku/1213.htm' },
+  boj: { label: '日本銀行「物価安定の目標」', url: 'https://www.boj.or.jp/mopo/outline/qqe.htm' },
+  mhlw_kensho: { label: '厚生労働省「財政検証・マクロ経済スライド」', url: 'https://www.mhlw.go.jp/stf/seisakunitsuite/bunya/nenkin/nenkin/zaisei-kensyo/index.html' },
+  kakei: { label: '総務省統計局「家計調査」（高齢無職世帯の消費支出）', url: 'https://www.stat.go.jp/data/kakei/index.html' },
 } as const
 
 export const CONSTANTS: ConstDef[] = [
@@ -87,6 +90,14 @@ export const CONSTANTS: ConstDef[] = [
   { key: 'dep_elderly_it', group: '税制・ふるさと納税', label: '扶養控除 老人70歳〜（所得税）', unit: '円', default: 480_000, source: SRC.nta_kojo, reviewYear: 2026, annual: false },
   { key: 'dep_elderly_rt', group: '税制・ふるさと納税', label: '扶養控除 老人70歳〜（住民税）', unit: '円', default: 380_000, source: SRC.nta_kojo, reviewYear: 2026, annual: false },
   { key: 'loan_resident_cap', group: '税制・ふるさと納税', label: '住宅ローン控除の住民税上限', unit: '円', default: 136_500, source: SRC.nta_loan, reviewYear: 2026, annual: false },
+
+  // ---- ライフプランの標準値（「前提の厳しさ診断」の比較基準。設定タブで変更可） ----
+  { key: 'std_inflation', group: 'ライフプランの標準値', label: '標準のインフレ率', unit: '%', default: 2, source: SRC.boj, reviewYear: 2026, annual: false, note: '日銀の物価安定の目標' },
+  { key: 'pension_slide', group: 'ライフプランの標準値', label: '年金のマクロスライド調整（物価上昇率からの差引）', unit: '%', default: 0.3, source: SRC.mhlw_kensho, reviewYear: 2026, annual: false, note: '年金の上昇率の標準 = インフレ率 − この値' },
+  { key: 'living_retire_ratio', group: 'ライフプランの標準値', label: '退職後の基本生活費の割合（現役期比）', unit: '%', default: 70, source: SRC.kakei, reviewYear: 2026, annual: false, note: '高齢無職世帯の消費支出は現役期より小さい' },
+  { key: 'std_invest_return', group: 'ライフプランの標準値', label: '標準の運用利回り', unit: '%', default: 3, source: SRC.boj, reviewYear: 2026, annual: false, note: '長期分散投資の控えめな目安' },
+  { key: 'std_invest_ratio', group: 'ライフプランの標準値', label: '標準の「収入のうち投資へ回す割合」', unit: '%', default: 20, source: SRC.kakei, reviewYear: 2026, annual: false },
+  { key: 'std_retire_age', group: 'ライフプランの標準値', label: '標準の退職年齢', unit: '歳', default: 65, source: SRC.pension, reviewYear: 2026, annual: false },
 ]
 
 const DEFAULTS: Record<string, number> = Object.fromEntries(CONSTANTS.map((c) => [c.key, c.default]))

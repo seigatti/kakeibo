@@ -17,6 +17,7 @@ import {
   type LifeplanChild,
   type LifeplanConfig,
 } from '../lifeplan'
+import { diagnoseScenario } from '../lifeplanDiagnosis'
 import LifeplanEditor from './LifeplanEditor'
 import ScenarioSurveyCard from './ScenarioSurveyCard'
 import { useStore } from '../store'
@@ -334,6 +335,26 @@ export default function Lifeplan() {
   const highlights = planHighlights(rA.rows, cfg)
   const events = lifeEvents(cfg, rA, thisYear)
 
+  // 前提の厳しさ診断: 項目ごとに標準値へ戻して再計算し、影響の大きい順に並べる
+  const diagnosis = diagnoseScenario(
+    cfg,
+    // 年金額・基本生活費も「その設定から」解決し直す（固定値を渡すと patch が効かなくなるため）
+    (c) =>
+      simulate(
+        c,
+        startInvest,
+        startLiquid,
+        thisYear,
+        resolvedNet,
+        Object.fromEntries(c.adults.map((a) => [a.name, a.pension ?? pensionEstOf(a)])),
+        c.living_cost ?? livingEstimate?.annual ?? 0,
+      ),
+    {
+      pensionEstimate: Object.fromEntries(cfg.adults.map((a) => [a.name, pensionEstOf(a)])),
+      livingEstimate: livingEstimate?.annual ?? null,
+    },
+  )
+
   // 年表の色分け。暗い背景で読みやすい定番色を対象者ごとに固定順で割り当てる
   const ADULT_COLORS = ['#38bdf8', '#4ade80']
   const CHILD_COLORS = ['#fbbf24', '#c084fc', '#f472b6']
@@ -472,6 +493,60 @@ export default function Lifeplan() {
         </div>
         <div className="kv"><span className="muted">資産が尽きる年</span>
           <span className={rA.depletionYear !== null ? 'neg' : 'pos'}>{rA.depletionYear ?? 'なし'}</span></div>
+      </div>
+
+      <div className="card">
+        <h2>
+          前提の厳しさ診断: {nameA}
+          <HelpTip title="この診断について">
+            シナリオの前提を1つずつ「一般的な標準値」に戻して80年分を計算し直し、
+            <b>その前提が結果をどれだけ悪くしているか</b>を実測しています。
+            <br />標準値は設定タブの「計算の基準値 → ライフプランの標準値」で変更でき、出典も確認できます。
+            <br />「標準に合わせる」を押すと、その値を当てた状態で編集画面が開きます（すぐには保存されません）。
+          </HelpTip>
+        </h2>
+        {diagnosis.factors.length === 0 ? (
+          <p className="pos" style={{ fontSize: 13, margin: 0 }}>✓ 標準より厳しい前提はありません</p>
+        ) : (
+          <>
+            <p style={{ fontSize: 13, margin: '0 0 8px' }} className={diagnosis.depletionYear !== null ? 'neg' : 'muted'}>
+              標準より厳しい前提が <b>{diagnosis.factors.length}件</b> あります。
+              {diagnosis.allStandard && (
+                <>
+                  {' '}すべて標準に合わせると 枯渇 {diagnosis.depletionYear ?? 'なし'} →{' '}
+                  <b className="pos">{diagnosis.allStandard.depletionYear ?? 'なし'}</b>
+                  （80年後 {diagnosis.allStandard.deltaAssets >= 0 ? '+' : ''}{yen(diagnosis.allStandard.deltaAssets)}）
+                </>
+              )}
+            </p>
+            {diagnosis.factors.map((f) => (
+              <div key={f.key} style={{ borderTop: '1px solid var(--border)', paddingTop: 8, marginBottom: 8 }}>
+                <div className="kv" style={{ alignItems: 'baseline' }}>
+                  <span><b>{f.label}</b> <span className="muted" style={{ fontSize: 12 }}>{f.current} → {f.standard}</span></span>
+                  <b className="pos">+{yen(f.deltaAssets)}</b>
+                </div>
+                <p className="muted" style={{ fontSize: 11, margin: '2px 0 4px' }}>
+                  {f.depletionBefore !== null && (
+                    <span className={f.depletionAfter === null ? 'pos' : ''}>
+                      標準にすると 枯渇 {f.depletionBefore} → {f.depletionAfter ?? 'なし'}。{' '}
+                    </span>
+                  )}
+                  {f.why}
+                </p>
+                <button className="btn small secondary" style={{ width: 'auto' }}
+                  onClick={() => startEdit({ ...parseLifeplan(JSON.stringify(cfg)), ...f.patch }, planA)}>
+                  この項目を標準に合わせる
+                </button>
+              </div>
+            ))}
+            {diagnosis.allStandard && diagnosis.factors.length > 1 && (
+              <button className="btn secondary" style={{ marginTop: 4 }}
+                onClick={() => startEdit({ ...parseLifeplan(JSON.stringify(cfg)), ...diagnosis.allStandard!.patch }, planA)}>
+                すべて標準に合わせる（{diagnosis.factors.length}件）
+              </button>
+            )}
+          </>
+        )}
       </div>
 
       <div className="card">

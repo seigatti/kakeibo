@@ -79,8 +79,9 @@ export interface LifeplanConfig {
   shortfall_cover: boolean // 現金が足りないとき投資を取り崩して補うか
   cash_floor: number // 補うときに保ちたい現金の下限（現在価格）。0=不足分だけ補う
   raise_rate: number // %（昇給率）
-  pension_growth: number // %（年金の上昇率。0=受給額は現在の額のまま。物価連動にするならインフレ率と同値）
+  pension_growth: number // %（年金の上昇率。物価連動なら概ねインフレ率−マクロスライド。0=生涯据え置き＝かなり厳しい想定）
   living_cost: number | null // 基本生活費（年額・現在価格・子供費用を除く）。null=実支出から自動推定
+  living_cost_retire_ratio: number // 全員が退職した年以降の基本生活費の割合(%)。100=変化なし
   child_multiplier: number // 子供費用の倍率
   start_assets_override: number | null // 開始資産の手動上書き（空なら最新スナップショット）
   adults: LifeplanAdult[]
@@ -100,8 +101,9 @@ export const DEFAULT_LIFEPLAN: LifeplanConfig = {
   shortfall_cover: true,
   cash_floor: 0,
   raise_rate: 1.0,
-  pension_growth: 0,
+  pension_growth: 1.7, // 標準インフレ2% − マクロスライド0.3%（物価にほぼ連動して改定される前提）
   living_cost: null,
+  living_cost_retire_ratio: 100,
   child_multiplier: 1.0,
   start_assets_override: null,
   adults: [],
@@ -360,6 +362,9 @@ export function simulate(
 ): LifeplanResult {
   const rows: LifeplanRow[] = []
   const livingCost = cfg.living_cost ?? resolvedLiving ?? 0
+  // 全員が退職し終える年（以降は基本生活費を living_cost_retire_ratio に落とす）
+  const retireYears = cfg.adults.filter((a) => a.birth_year && a.income_enabled).map((a) => a.birth_year! + a.retire_age)
+  const allRetiredYear = retireYears.length ? Math.max(...retireYears) : null
   let invest = startInvest // 運用利回りが効く投資分
   let liquid = startLiquid // 現金・年金（利回りは効かず、収支の黒字が積み上がる）
   let depletionYear: number | null = null
@@ -414,7 +419,9 @@ export function simulate(
       }
     }
 
-    const living = livingCost * infl
+    // 退職後は生活費が下がる想定（既定100%＝変化なし）
+    const livingRatio = allRetiredYear !== null && year >= allRetiredYear ? (cfg.living_cost_retire_ratio ?? 100) / 100 : 1
+    const living = livingCost * infl * livingRatio
     const childNominal = childCost * infl
     const expense = living + childNominal + customOut * infl - Math.min(homeNet, 0) // 住宅の支出分
     const income = salary + pension + customIn * infl + Math.max(homeNet, 0) // 住宅の収入分（家賃控除・ローン控除）

@@ -166,7 +166,7 @@ export default function LifeplanEditor({
           <DecimalField label="昇給率（%/年）" value={cfg.raise_rate} onChange={(v) => upd({ raise_rate: v })}
             help={<HelpTip title="昇給率">給与収入（手取り）が退職まで毎年この率で増える想定です。例: 0.1と入力すると毎年0.1%ずつ増加。<br />インフレ率と比べると実質の増減が分かります（<b>実質賃金 = 昇給率 − インフレ率</b>）。昇給率をインフレ率と同じにすれば実質横ばい、下回れば手取りは実質的に目減りします。</HelpTip>} />
           <DecimalField label="年金の上昇率（%/年）" value={cfg.pension_growth} onChange={(v) => upd({ pension_growth: v })}
-            help={<HelpTip title="年金の上昇率">0 = 受給額が現在の額のまま増えない保守的な想定。年金は物価に完全には連動しない（マクロ経済スライド）ため控えめな値を推奨。物価連動を想定するならインフレ率と同じ値を入力。</HelpTip>} />
+            help={<HelpTip title="年金の上昇率">年金は物価にほぼ連動して改定されます（マクロ経済スライドにより物価上昇より少し低くなる想定）。<br />既定はインフレ2%−スライド0.3%＝<b>1.7%</b>です。<br /><b>0%にすると受給額が生涯据え置き</b>という、かなり厳しい前提になります（40年の受給期間では結果が大きく悪化します）。</HelpTip>} />
         </div>
         <div className="row2">
           <label className="field">基本生活費（空欄=実績から自動）
@@ -181,6 +181,11 @@ export default function LifeplanEditor({
               value={cfg.living_cost ?? ''} onChange={(e) => upd({ living_cost: numOrNull(e.target.value) })} /></label>
           <DecimalField label="子供費用の倍率（標準=1.0）" value={cfg.child_multiplier} onChange={(v) => upd({ child_multiplier: v })}
             help={<HelpTip title="子供費用の倍率">内蔵の標準費用（子供カードの？参照）に掛ける係数。ご家庭の実感に合わせて 0.8〜1.2 程度で調整してください（児童手当は倍率をかけずにそのまま差し引きます）。</HelpTip>} />
+        </div>
+        <div className="row2">
+          <DecimalField label="退職後の基本生活費の割合（%）" value={cfg.living_cost_retire_ratio ?? 100} onChange={(v) => upd({ living_cost_retire_ratio: v })}
+            help={<HelpTip title="退職後の基本生活費">全員が退職し終えた年から、基本生活費をこの割合にします（子供費用・カスタム支出は別扱い）。<br />家計調査では高齢無職世帯の消費支出は現役期より小さく、目安は<b>70%程度</b>です。<br />100%のままだと退職後も現役と同額を使い続ける前提になり、結果が厳しめに出ます。</HelpTip>} />
+          <div />
         </div>
         <label className="field">開始資産（空欄=最新の記録を採用）
           <input type="text" inputMode="numeric" placeholder={latestAssets !== null ? `自動: ${amt(latestAssets)}` : ''}

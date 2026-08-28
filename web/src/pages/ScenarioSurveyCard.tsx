@@ -2,8 +2,10 @@ import { useMemo, useState } from 'react'
 import HelpTip from '../components/HelpTip'
 import { scenarioSummary, type LifeplanConfig } from '../lifeplan'
 import {
+  answerEffects,
   buildConfigFromAnswers,
   defaultAnswers,
+  expandPolicyAnswers,
   questionsFor,
   type SurveyAnswers,
   type SurveyMode,
@@ -36,8 +38,8 @@ export default function ScenarioSurveyCard({ base, onSave, onApply, onCancel, sa
 
   const switchMode = (m: SurveyMode) => {
     setMode(m)
-    // 詳細版で増えた質問にも既定値を入れる（共通の質問は回答を引き継ぐ）
-    setAnswers((prev) => ({ ...defaultAnswers(m), ...prev }))
+    // 詳細版へ切り替えるときは、簡易版で答えた「方針」から各詳細項目の初期値を作る
+    setAnswers((prev) => ({ ...defaultAnswers(m), ...expandPolicyAnswers(prev), ...prev }))
     setMsg('')
   }
 
@@ -60,14 +62,16 @@ export default function ScenarioSurveyCard({ base, onSave, onApply, onCancel, sa
           自動で組み立てます。
           <br />答えた項目だけが変わり、<b>大人の収入などの土台は引き継ぎ</b>ます。
           <br />作成前に必ず内容をプレビューできます。
+          <br />簡易版は「方針」をいくつか選ぶだけで、詳細版の複数の項目がまとめて決まります
+          （何が決まるかは各質問の下に「→」で表示されます）。詳細版に切り替えると、その内容を1つずつ調整できます。
           <br />「税金が上がる」の回答は、手取りの伸び（昇給率）を鈍らせる形で反映しています。
         </HelpTip>
       </h2>
 
       <>
           <div className="seg">
-            <button className={mode === 'simple' ? 'on' : ''} onClick={() => switchMode('simple')}>簡易版（7問）</button>
-            <button className={mode === 'detail' ? 'on' : ''} onClick={() => switchMode('detail')}>詳細版（12問）</button>
+            <button className={mode === 'simple' ? 'on' : ''} onClick={() => switchMode('simple')}>簡易版（{questionsFor('simple').length}問）</button>
+            <button className={mode === 'detail' ? 'on' : ''} onClick={() => switchMode('detail')}>詳細版（{questionsFor('detail').length}問）</button>
           </div>
 
           {questions.map((q, qi) => (
@@ -86,8 +90,15 @@ export default function ScenarioSurveyCard({ base, onSave, onApply, onCancel, sa
                 ))}
               </div>
               {(() => {
-                const note = q.options.find((o) => o.value === answers[q.id])?.note
-                return note ? <p className="muted" style={{ fontSize: 11, margin: '4px 0 0' }}>→ {note}</p> : null
+                const effects = answerEffects(q.id, answers[q.id])
+                if (effects.length === 0) return null
+                return (
+                  <div className="muted" style={{ fontSize: 11, margin: '4px 0 0', lineHeight: 1.7 }}>
+                    {effects.map((line, k) => (
+                      <div key={k}>→ {line}</div>
+                    ))}
+                  </div>
+                )
               })()}
             </div>
           ))}

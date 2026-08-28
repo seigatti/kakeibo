@@ -105,6 +105,54 @@ export default function LifeplanEditor({
           <div />
         </div>
         <div className="row2">
+          <label className="field">投資の取り崩し方式
+            <HelpTip title="投資の取り崩し">
+              退職後などに投資を計画的に現金化する設定です。
+              <br />・率: 毎年「その年の投資残高 × 率」を現金へ移します（4%なら いわゆる4%ルール）。残高が減れば取り崩し額も減ります。
+              <br />・金額: 毎年その額を現金へ移します。現在の価格で入力し、物価上昇に合わせて増額されます。
+              <br />取り崩しは投資から現金へ移すだけなので、その年の総資産は変わりません（減るのは将来の複利分です）。
+            </HelpTip>
+            <select value={cfg.withdraw_mode ?? 'none'} onChange={(e) => upd({ withdraw_mode: e.target.value as LifeplanConfig['withdraw_mode'] })}>
+              <option value="none">取り崩さない</option>
+              <option value="rate">率で指定（%/年）</option>
+              <option value="amount">金額で指定（年額）</option>
+            </select></label>
+          {cfg.withdraw_mode === 'rate' ? (
+            <DecimalField label="取り崩し率（%/年）" value={cfg.withdraw_value ?? 4} onChange={(v) => upd({ withdraw_value: v })} />
+          ) : cfg.withdraw_mode === 'amount' ? (
+            <label className="field">取り崩し額（年額・現在価格）
+              <input type="text" inputMode="numeric" value={cfg.withdraw_value ?? 0}
+                onChange={(e) => upd({ withdraw_value: Number(e.target.value.replace(/[,，]/g, '')) || 0 })} /></label>
+          ) : (
+            <div />
+          )}
+        </div>
+        {cfg.withdraw_mode !== 'none' && (
+          <label className="field">取り崩し開始年
+            <input type="text" inputMode="numeric" value={cfg.withdraw_start_year ?? thisYear}
+              onChange={(e) => upd({ withdraw_start_year: Number(e.target.value) || thisYear })} /></label>
+        )}
+        <div className="row2">
+          <label className="field">現金が足りないとき
+            <HelpTip title="現金が足りないとき">
+              取り崩しルールに従っても現金が不足する年の扱いです。
+              <br />「投資から補う」にすると、不足分（下限を入れた場合はその水準まで）を投資から現金化します。
+              <br />「補わない」は投資に手を付けない前提で、現金がマイナス（＝借入）のまま推移します。
+              <br />どちらも投資⇔現金の移動なので、その年の総資産は変わりません。
+            </HelpTip>
+            <select value={cfg.shortfall_cover === false ? 'none' : 'cover'} onChange={(e) => upd({ shortfall_cover: e.target.value === 'cover' })}>
+              <option value="cover">投資から補う</option>
+              <option value="none">補わない</option>
+            </select></label>
+          {cfg.shortfall_cover !== false ? (
+            <label className="field">保ちたい現金の下限（現在価格）
+              <input type="text" inputMode="numeric" placeholder="0＝不足分だけ補う" value={cfg.cash_floor ?? 0}
+                onChange={(e) => upd({ cash_floor: Number(e.target.value.replace(/[,，]/g, '')) || 0 })} /></label>
+          ) : (
+            <div />
+          )}
+        </div>
+        <div className="row2">
           <DecimalField label="昇給率（%/年）" value={cfg.raise_rate} onChange={(v) => upd({ raise_rate: v })}
             help={<HelpTip title="昇給率">給与収入（手取り）が退職まで毎年この率で増える想定です。例: 0.1と入力すると毎年0.1%ずつ増加。</HelpTip>} />
           <DecimalField label="年金の上昇率（%/年）" value={cfg.pension_growth} onChange={(v) => upd({ pension_growth: v })}

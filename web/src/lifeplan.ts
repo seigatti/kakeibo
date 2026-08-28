@@ -72,6 +72,11 @@ export interface LifeplanConfig {
   inflation: number // %（実質インフレ率）
   invest_return: number // %（運用利回り。投資分にのみ複利で適用）
   invest_ratio: number // %（毎年の収入のうち投資へ回す割合。その年の黒字の範囲まで。0=黒字は全額現金に積む）
+  withdraw_mode: 'none' | 'rate' | 'amount' // 投資の計画的な取り崩し方式
+  withdraw_value: number // rate=%/年（その年の投資残高に対して）/ amount=年額（現在価格）
+  withdraw_start_year: number // 取り崩しを始める年
+  shortfall_cover: boolean // 現金が足りないとき投資を取り崩して補うか
+  cash_floor: number // 補うときに保ちたい現金の下限（現在価格）。0=不足分だけ補う
   raise_rate: number // %（昇給率）
   pension_growth: number // %（年金の上昇率。0=受給額は現在の額のまま。物価連動にするならインフレ率と同値）
   living_cost: number | null // 基本生活費（年額・現在価格・子供費用を除く）。null=実支出から自動推定
@@ -87,6 +92,11 @@ export const DEFAULT_LIFEPLAN: LifeplanConfig = {
   inflation: 2.0,
   invest_return: 3.0,
   invest_ratio: 0,
+  withdraw_mode: 'none',
+  withdraw_value: 4,
+  withdraw_start_year: new Date().getFullYear() + 30,
+  shortfall_cover: true,
+  cash_floor: 0,
   raise_rate: 1.0,
   pension_growth: 0,
   living_cost: null,
@@ -120,6 +130,17 @@ export function scenarioSummary(cfg: LifeplanConfig): string[] {
   const lines: string[] = []
   lines.push(`インフレ ${cfg.inflation}% / 利回り ${cfg.invest_return}% / 昇給 ${cfg.raise_rate}% / 年金上昇 ${cfg.pension_growth ?? 0}%`)
   lines.push(`収入のうち投資へ回す割合: ${cfg.invest_ratio ?? 0}%`)
+  lines.push(
+    `取り崩し: ${
+      !cfg.withdraw_mode || cfg.withdraw_mode === 'none'
+        ? 'しない'
+        : `${cfg.withdraw_start_year}年から毎年${cfg.withdraw_mode === 'rate' ? `${cfg.withdraw_value}%` : yen(cfg.withdraw_value)}`
+    } / 現金不足時: ${
+      cfg.shortfall_cover === false
+        ? '補わない'
+        : `投資から補う${(cfg.cash_floor ?? 0) > 0 ? `（下限 ${yen(cfg.cash_floor)}）` : ''}`
+    }`,
+  )
   lines.push(`基本生活費: ${cfg.living_cost === null ? '実績から自動' : yen(cfg.living_cost)}（子供費用倍率 ${cfg.child_multiplier}）`)
   if (cfg.adults.length) {
     lines.push(
@@ -405,11 +426,23 @@ export function simulate(
     const toInvest = Math.min(income * ((cfg.invest_ratio ?? 0) / 100), Math.max(0, surplus), Math.max(0, liquid))
     invest += toInvest
     liquid -= toInvest
-    // 現金が足りない年は投資を取り崩して充てる（実際の家計と同じ動き）。振替なので総資産は変わらない
-    if (liquid < 0 && invest > 0) {
-      const withdraw = Math.min(-liquid, invest)
-      invest -= withdraw
-      liquid += withdraw
+    // ④ 計画的な取り崩し（例: 退職後は毎年4%ずつ現金化）。振替なのでその年の総資産は変わらない
+    if (cfg.withdraw_mode && cfg.withdraw_mode !== 'none' && year >= cfg.withdraw_start_year && invest > 0) {
+      const want = cfg.withdraw_mode === 'rate'
+        ? invest * (cfg.withdraw_value / 100) // その年の投資残高に対する率
+        : cfg.withdraw_value * infl // 定額は現在価格なのでその年の物価に換算
+      const w = Math.min(Math.max(0, want), invest)
+      invest -= w
+      liquid += w
+    }
+    // ⑤ それでも現金が足りないときは投資を取り崩して補う（設定で無効化できる）
+    if (cfg.shortfall_cover !== false && invest > 0) {
+      const target = (cfg.cash_floor ?? 0) * infl // 保ちたい現金の下限
+      if (liquid < target) {
+        const w = Math.min(target - liquid, invest)
+        invest -= w
+        liquid += w
+      }
     }
     const assets = invest + liquid
     if (assets < 0 && depletionYear === null) depletionYear = year

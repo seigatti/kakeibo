@@ -19,8 +19,8 @@ export interface SurveyOption {
 export interface SurveyQuestion {
   id: string
   question: string
-  /** 詳細版だけで聞く質問は 'detail' */
-  mode: 'both' | 'detail'
+  /** both=両方 / simple=簡易版だけの「方針」質問 / detail=詳細版だけ */
+  mode: 'both' | 'simple' | 'detail'
   options: SurveyOption[]
 }
 
@@ -108,7 +108,7 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
   {
     id: 'school',
     question: '子供の学校はどう想定しますか？',
-    mode: 'both',
+    mode: 'detail',
     options: [
       { value: 'public', label: 'すべて公立', note: '大学も国公立' },
       { value: 'mixed', label: '公立中心・大学は私立' },
@@ -118,7 +118,7 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
   {
     id: 'course',
     question: '子供の進路と住まいは？',
-    mode: 'both',
+    mode: 'detail',
     options: [
       { value: 'high', label: '高卒まで' },
       { value: 'univ_home', label: '大学・実家から' },
@@ -138,9 +138,33 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
     ],
   },
   {
+    id: 'withdraw',
+    question: '老後、投資をどう取り崩しますか？',
+    mode: 'both',
+    options: [
+      { value: 'none', label: '取り崩さない', note: '計画的な取り崩しはせず、現金が足りないときだけ取り崩す' },
+      { value: 'rate4', label: '毎年4%', note: '投資残高の4%を現金化（いわゆる4%ルール）。退職の年から' },
+      { value: 'rate3', label: '毎年3%', note: '投資残高の3%を現金化（長持ち重視）。退職の年から' },
+      { value: 'amount200', label: '年200万', note: '毎年200万円を現金化（物価に合わせて増額）。退職の年から' },
+      { value: 'amount300', label: '年300万', note: '毎年300万円を現金化（物価に合わせて増額）。退職の年から' },
+      { value: 'amount500', label: '年500万', note: '毎年500万円を現金化（物価に合わせて増額）。退職の年から' },
+    ],
+  },
+  {
+    id: 'shortfall',
+    question: '取り崩しても現金が足りなくなったら？',
+    mode: 'both',
+    options: [
+      { value: 'cover', label: '不足分だけ補う', note: '足りない分だけ投資を現金化する' },
+      { value: 'floor100', label: '現金100万を保つ', note: '現金が100万円を下回らないよう投資を現金化する' },
+      { value: 'floor300', label: '現金300万を保つ', note: '現金が300万円を下回らないよう投資を現金化する' },
+      { value: 'none', label: '補わない', note: '投資には手を付けない（現金がマイナスになることがあります）' },
+    ],
+  },
+  {
     id: 'invest_ratio',
     question: '収入のうち、どのくらいを資産運用に回したいですか？',
-    mode: 'both',
+    mode: 'detail',
     options: [
       { value: '0', label: '0%', note: '黒字は現金のまま' },
       { value: '10', label: '10%' },
@@ -161,7 +185,7 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
   {
     id: 'tax',
     question: '税金・社会保険料は今後どうなると思いますか？',
-    mode: 'both',
+    mode: 'detail',
     options: [
       { value: 'flat', label: '変わらない' },
       { value: 'mild', label: '少し上がる', note: '昇給率 −0.3%' },
@@ -171,7 +195,7 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
   {
     id: 'standard',
     question: '一般的なライフイベント費用（住宅修繕・家電・冠婚葬祭・医療費）を含めますか？',
-    mode: 'both',
+    mode: 'detail',
     options: [
       { value: 'none', label: '含めない' },
       { value: 'standard', label: '標準で含める', note: '家電5万/年・冠婚葬祭10万/年・医療費は年齢に応じて増加' },
@@ -230,10 +254,91 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
       { value: 'heavy', label: '10年間・年150万' },
     ],
   },
+  // ---- ここから簡易版だけの「方針」質問（1問で詳細の複数項目が決まる） ----
+  {
+    id: 'policy_education',
+    question: '子供の教育方針は？',
+    mode: 'simple',
+    options: [
+      { value: 'public', label: '公立中心' },
+      { value: 'mixed', label: '私立も視野' },
+      { value: 'best', label: 'できる限り良い教育' },
+    ],
+  },
+  {
+    id: 'policy_money',
+    question: '家計の方針は？',
+    mode: 'simple',
+    options: [
+      { value: 'saver', label: '堅実に貯める' },
+      { value: 'balance', label: 'バランス' },
+      { value: 'enjoy', label: '今を楽しむ' },
+    ],
+  },
+  {
+    id: 'policy_future',
+    question: '将来の見通しは？',
+    mode: 'simple',
+    options: [
+      { value: 'optimistic', label: '楽観的' },
+      { value: 'normal', label: '標準的' },
+      { value: 'cautious', label: '慎重' },
+    ],
+  },
 ]
 
+/** 方針の回答 → 詳細質問の回答。ここを変えれば画面の説明（answerEffects）も自動で追従する */
+export const POLICY_MAP: Record<string, Record<string, SurveyAnswers>> = {
+  policy_education: {
+    public: { school: 'public', course: 'univ_home' },
+    mixed: { school: 'mixed', course: 'univ_alone' },
+    best: { school: 'private', course: 'grad' },
+  },
+  policy_money: {
+    saver: { invest_ratio: '30', living: '3000000', standard: 'standard', style: '3' },
+    balance: { invest_ratio: '20', living: 'auto', standard: 'standard', style: '3' },
+    enjoy: { invest_ratio: '10', living: '5000000', standard: 'high', style: '1' },
+  },
+  policy_future: {
+    optimistic: { inflation: '1', tax: 'flat', retire: '60' },
+    normal: { inflation: '2', tax: 'mild', retire: '65' },
+    cautious: { inflation: '3', tax: 'steep', retire: '70' },
+  },
+}
+
+/** 方針の回答を詳細質問の回答へ展開。詳細で明示された回答があればそちらを優先する */
+export function expandPolicyAnswers(answers: SurveyAnswers): SurveyAnswers {
+  const derived: SurveyAnswers = {}
+  for (const [pid, table] of Object.entries(POLICY_MAP)) {
+    const chosen = answers[pid]
+    if (chosen && table[chosen]) Object.assign(derived, table[chosen])
+  }
+  return { ...derived, ...answers }
+}
+
+const findQ = (id: string) => SURVEY_QUESTIONS.find((q) => q.id === id)
+
+/**
+ * 選んだ回答で何が決まるかを人が読める行にする。
+ * 方針の質問は POLICY_MAP を引いて「詳細質問 → 選択肢」を並べるので、
+ * 対応表を変えれば説明も自動で追従する（手書きの説明とズレない）。
+ */
+export function answerEffects(questionId: string, value: string): string[] {
+  const table = POLICY_MAP[questionId]?.[value]
+  if (table) {
+    return Object.entries(table).map(([qid, val]) => {
+      const q = findQ(qid)
+      const opt = q?.options.find((o) => o.value === val)
+      const label = q?.question.replace(/[？?]$/, '') ?? qid
+      return `${label} → ${opt?.label ?? val}${opt?.note ? `（${opt.note}）` : ''}`
+    })
+  }
+  const note = findQ(questionId)?.options.find((o) => o.value === value)?.note
+  return note ? [note] : []
+}
+
 export const questionsFor = (mode: SurveyMode) =>
-  SURVEY_QUESTIONS.filter((q) => (mode === 'detail' ? true : q.mode === 'both'))
+  SURVEY_QUESTIONS.filter((q) => q.mode === 'both' || q.mode === mode)
 
 /** その質問セットの既定回答（＝各質問の最初の選択肢） */
 export function defaultAnswers(mode: SurveyMode): SurveyAnswers {
@@ -246,10 +351,12 @@ const CHILD_OFFSETS = [1, 3, 5] // 何年後に生まれる想定か
 
 /** 回答から新しいシナリオ設定を作る。回答が触れない項目は base のまま */
 export function buildConfigFromAnswers(
-  answers: SurveyAnswers,
+  rawAnswers: SurveyAnswers,
   base: LifeplanConfig,
   thisYear: number = new Date().getFullYear(),
 ): LifeplanConfig {
+  // 簡易版の「方針」回答を詳細項目へ展開してから組み立てる
+  const answers = expandPolicyAnswers(rawAnswers)
   const cfg: LifeplanConfig = {
     ...base,
     adults: base.adults.map((a) => ({ ...a })),
@@ -339,6 +446,33 @@ export function buildConfigFromAnswers(
   if (answers.inflation) cfg.inflation = Number(answers.inflation)
   if (answers.retire) cfg.adults = cfg.adults.map((a) => ({ ...a, retire_age: Number(answers.retire) }))
   if (answers.living) cfg.living_cost = answers.living === 'auto' ? null : Number(answers.living)
+
+  // 取り崩し。開始年は「収入のある大人の退職年の最大値」＝働き終える年
+  if (answers.withdraw) {
+    const retireYears = cfg.adults
+      .filter((a) => a.birth_year && a.income_enabled)
+      .map((a) => a.birth_year! + a.retire_age)
+    const startYear = retireYears.length ? Math.max(...retireYears) : thisYear + 30
+    const w = answers.withdraw
+    if (w === 'none') {
+      cfg.withdraw_mode = 'none'
+    } else if (w.startsWith('rate')) {
+      cfg.withdraw_mode = 'rate'
+      cfg.withdraw_value = Number(w.replace('rate', ''))
+      cfg.withdraw_start_year = startYear
+    } else if (w.startsWith('amount')) {
+      cfg.withdraw_mode = 'amount'
+      cfg.withdraw_value = Number(w.replace('amount', '')) * 10_000
+      cfg.withdraw_start_year = startYear
+    }
+  }
+
+  // 現金が足りなくなったときの扱い
+  if (answers.shortfall) {
+    const sf = answers.shortfall
+    cfg.shortfall_cover = sf !== 'none'
+    cfg.cash_floor = sf === 'floor100' ? 1_000_000 : sf === 'floor300' ? 3_000_000 : 0
+  }
 
   // 一般的な支出は住まい・大人が確定したあとで組み立てる
   if (answers.standard) cfg.custom_flows = applyStandardExpenses(cfg, answers.standard as StandardLevel, thisYear)

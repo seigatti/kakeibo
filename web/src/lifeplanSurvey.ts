@@ -162,6 +162,17 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
     ],
   },
   {
+    id: 'withdraw_skip',
+    question: '現金が十分あるときは、その年の取り崩しを止めますか？',
+    mode: 'both',
+    options: [
+      { value: '0', label: '止めない', note: '毎年ルールどおりに取り崩す' },
+      { value: '30', label: '現金比率30%以上で止める', note: '現金 ÷（現金＋投資）が30%以上の年は取り崩さない' },
+      { value: '50', label: '50%以上で止める', note: '現金 ÷（現金＋投資）が50%以上の年は取り崩さない' },
+      { value: '70', label: '70%以上で止める', note: '現金 ÷（現金＋投資）が70%以上の年は取り崩さない' },
+    ],
+  },
+  {
     id: 'invest_ratio',
     question: '収入のうち、どのくらいを資産運用に回したいですか？',
     mode: 'detail',
@@ -219,8 +230,25 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
     mode: 'detail',
     options: [
       { value: '1', label: '落ち着く', note: '1%' },
-      { value: '2', label: '標準', note: '2%' },
-      { value: '3', label: '高めが続く', note: '3%' },
+      { value: '1.5', label: 'やや低め', note: '1.5%' },
+      { value: '2', label: '標準', note: '2%（日銀の目標）' },
+      { value: '3', label: 'やや高め', note: '3%' },
+      { value: '4', label: '高め', note: '4%' },
+      { value: '5', label: 'かなり高い', note: '5%' },
+      { value: '6', label: '非常に高い', note: '6%' },
+      { value: '7', label: '極めて高い', note: '7%' },
+    ],
+  },
+  {
+    id: 'real_wage',
+    question: '実質賃金（物価を差し引いた手取りの伸び）はどうなると思いますか？',
+    mode: 'detail',
+    options: [
+      { value: '0.5', label: '上がる', note: '昇給率 = インフレ率 + 0.5%' },
+      { value: '0', label: '横ばい', note: '昇給率 = インフレ率（物価と同じだけ賃上げ）' },
+      { value: '-0.5', label: '少し下がる', note: '昇給率 = インフレ率 − 0.5%' },
+      { value: '-1', label: '下がる', note: '昇給率 = インフレ率 − 1%' },
+      { value: '-2', label: '大きく下がる', note: '昇給率 = インフレ率 − 2%' },
     ],
   },
   {
@@ -300,9 +328,9 @@ export const POLICY_MAP: Record<string, Record<string, SurveyAnswers>> = {
     enjoy: { invest_ratio: '10', living: '5000000', standard: 'high', style: '1' },
   },
   policy_future: {
-    optimistic: { inflation: '1', tax: 'flat', retire: '60' },
-    normal: { inflation: '2', tax: 'mild', retire: '65' },
-    cautious: { inflation: '3', tax: 'steep', retire: '70' },
+    optimistic: { inflation: '1', real_wage: '0.5', tax: 'flat', retire: '60' },
+    normal: { inflation: '2', real_wage: '0', tax: 'mild', retire: '65' },
+    cautious: { inflation: '3', real_wage: '-1', tax: 'steep', retire: '70' },
   },
 }
 
@@ -435,15 +463,18 @@ export function buildConfigFromAnswers(
     else cfg.home = { ...cfg.home, enabled: true, buy_year: thisYear + Number(answers.home) }
   }
 
-  // 税・社会保険料の見通し → 手取りの伸び（昇給率）を鈍らせる形で反映
-  if (answers.tax) {
-    const drag = answers.tax === 'steep' ? 0.8 : answers.tax === 'mild' ? 0.3 : 0
-    cfg.raise_rate = Math.round((base.raise_rate - drag) * 10) / 10
-  }
-
   // ---- 詳細版 ----
   if (answers.style) cfg.invest_return = Number(answers.style)
   if (answers.inflation) cfg.inflation = Number(answers.inflation)
+
+  // 昇給率（名目）= インフレ率 + 実質賃金 − 税・社会保険料の負担増。
+  // インフレ率を確定させてから計算する（実質賃金0なら 昇給率 = インフレ率）
+  const taxDrag = answers.tax === 'steep' ? 0.8 : answers.tax === 'mild' ? 0.3 : 0
+  if (answers.real_wage !== undefined) {
+    cfg.raise_rate = Math.round((cfg.inflation + Number(answers.real_wage) - taxDrag) * 10) / 10
+  } else if (answers.tax) {
+    cfg.raise_rate = Math.round((base.raise_rate - taxDrag) * 10) / 10 // 実質賃金の回答が無い古い回答との互換
+  }
   if (answers.retire) cfg.adults = cfg.adults.map((a) => ({ ...a, retire_age: Number(answers.retire) }))
   if (answers.living) cfg.living_cost = answers.living === 'auto' ? null : Number(answers.living)
 
@@ -466,6 +497,8 @@ export function buildConfigFromAnswers(
       cfg.withdraw_start_year = startYear
     }
   }
+
+  if (answers.withdraw_skip !== undefined) cfg.withdraw_skip_cash_ratio = Number(answers.withdraw_skip)
 
   // 現金が足りなくなったときの扱い
   if (answers.shortfall) {

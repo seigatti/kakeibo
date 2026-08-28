@@ -128,9 +128,19 @@ export default function LifeplanEditor({
           )}
         </div>
         {cfg.withdraw_mode !== 'none' && (
-          <label className="field">取り崩し開始年
-            <input type="text" inputMode="numeric" value={cfg.withdraw_start_year ?? thisYear}
-              onChange={(e) => upd({ withdraw_start_year: Number(e.target.value) || thisYear })} /></label>
+          <div className="row2">
+            <label className="field">取り崩し開始年
+              <input type="text" inputMode="numeric" value={cfg.withdraw_start_year ?? thisYear}
+                onChange={(e) => upd({ withdraw_start_year: Number(e.target.value) || thisYear })} /></label>
+            <label className="field">取り崩しを止める現金比率（%）
+              <HelpTip title="取り崩しを止める現金比率">
+                その年の 現金 ÷（現金＋投資）がこの割合以上なら、その年の取り崩しを見送ります。
+                <br />現金が十分あるうちは投資を売らない、という運用を表せます。
+                <br />0 にすると毎年ルールどおりに取り崩します。
+              </HelpTip>
+              <input type="text" inputMode="numeric" placeholder="0＝止めない" value={cfg.withdraw_skip_cash_ratio ?? 0}
+                onChange={(e) => upd({ withdraw_skip_cash_ratio: Number(e.target.value) || 0 })} /></label>
+          </div>
         )}
         <div className="row2">
           <label className="field">現金が足りないとき
@@ -154,7 +164,7 @@ export default function LifeplanEditor({
         </div>
         <div className="row2">
           <DecimalField label="昇給率（%/年）" value={cfg.raise_rate} onChange={(v) => upd({ raise_rate: v })}
-            help={<HelpTip title="昇給率">給与収入（手取り）が退職まで毎年この率で増える想定です。例: 0.1と入力すると毎年0.1%ずつ増加。</HelpTip>} />
+            help={<HelpTip title="昇給率">給与収入（手取り）が退職まで毎年この率で増える想定です。例: 0.1と入力すると毎年0.1%ずつ増加。<br />インフレ率と比べると実質の増減が分かります（<b>実質賃金 = 昇給率 − インフレ率</b>）。昇給率をインフレ率と同じにすれば実質横ばい、下回れば手取りは実質的に目減りします。</HelpTip>} />
           <DecimalField label="年金の上昇率（%/年）" value={cfg.pension_growth} onChange={(v) => upd({ pension_growth: v })}
             help={<HelpTip title="年金の上昇率">0 = 受給額が現在の額のまま増えない保守的な想定。年金は物価に完全には連動しない（マクロ経済スライド）ため控えめな値を推奨。物価連動を想定するならインフレ率と同じ値を入力。</HelpTip>} />
         </div>

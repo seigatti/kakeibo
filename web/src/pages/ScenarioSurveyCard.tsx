@@ -38,8 +38,18 @@ export default function ScenarioSurveyCard({ base, onSave, onApply, onCancel, sa
 
   const switchMode = (m: SurveyMode) => {
     setMode(m)
-    // 詳細版へ切り替えるときは、簡易版で答えた「方針」から各詳細項目の初期値を作る
-    setAnswers((prev) => ({ ...defaultAnswers(m), ...expandPolicyAnswers(prev), ...prev }))
+    setAnswers((prev) => {
+      if (m === 'detail') {
+        // 簡易版で答えた「方針」から各詳細項目の初期値を作る
+        return { ...defaultAnswers('detail'), ...expandPolicyAnswers(prev), ...prev }
+      }
+      // 簡易版へ戻すときは、詳細版で個別に答えた分を捨てて「方針」が効くようにする
+      // （残したままだと方針を変えても詳細の回答が優先されて変わらないため）
+      const keep = new Set(questionsFor('simple').map((q) => q.id))
+      const kept: SurveyAnswers = {}
+      for (const [k, v] of Object.entries(prev)) if (keep.has(k)) kept[k] = v
+      return { ...defaultAnswers('simple'), ...kept }
+    })
     setMsg('')
   }
 

@@ -75,6 +75,7 @@ export interface LifeplanConfig {
   withdraw_mode: 'none' | 'rate' | 'amount' // 投資の計画的な取り崩し方式
   withdraw_value: number // rate=%/年（その年の投資残高に対して）/ amount=年額（現在価格）
   withdraw_start_year: number // 取り崩しを始める年
+  withdraw_skip_cash_ratio: number // 現金比率がこの%以上なら その年の取り崩しを止める。0=常に取り崩す
   shortfall_cover: boolean // 現金が足りないとき投資を取り崩して補うか
   cash_floor: number // 補うときに保ちたい現金の下限（現在価格）。0=不足分だけ補う
   raise_rate: number // %（昇給率）
@@ -95,6 +96,7 @@ export const DEFAULT_LIFEPLAN: LifeplanConfig = {
   withdraw_mode: 'none',
   withdraw_value: 4,
   withdraw_start_year: new Date().getFullYear() + 30,
+  withdraw_skip_cash_ratio: 0,
   shortfall_cover: true,
   cash_floor: 0,
   raise_rate: 1.0,
@@ -134,7 +136,7 @@ export function scenarioSummary(cfg: LifeplanConfig): string[] {
     `取り崩し: ${
       !cfg.withdraw_mode || cfg.withdraw_mode === 'none'
         ? 'しない'
-        : `${cfg.withdraw_start_year}年から毎年${cfg.withdraw_mode === 'rate' ? `${cfg.withdraw_value}%` : yen(cfg.withdraw_value)}`
+        : `${cfg.withdraw_start_year}年から毎年${cfg.withdraw_mode === 'rate' ? `${cfg.withdraw_value}%` : yen(cfg.withdraw_value)}${(cfg.withdraw_skip_cash_ratio ?? 0) > 0 ? `（現金比率${cfg.withdraw_skip_cash_ratio}%以上なら見送り）` : ''}`
     } / 現金不足時: ${
       cfg.shortfall_cover === false
         ? '補わない'
@@ -427,7 +429,11 @@ export function simulate(
     invest += toInvest
     liquid -= toInvest
     // ④ 計画的な取り崩し（例: 退職後は毎年4%ずつ現金化）。振替なのでその年の総資産は変わらない
-    if (cfg.withdraw_mode && cfg.withdraw_mode !== 'none' && year >= cfg.withdraw_start_year && invest > 0) {
+    // ただし現金が十分ある年（現金比率が設定値以上）は取り崩しを見送る
+    const totalNow = invest + liquid
+    const cashRatio = totalNow > 0 ? (liquid / totalNow) * 100 : 0
+    const skipWithdraw = (cfg.withdraw_skip_cash_ratio ?? 0) > 0 && cashRatio >= cfg.withdraw_skip_cash_ratio
+    if (!skipWithdraw && cfg.withdraw_mode && cfg.withdraw_mode !== 'none' && year >= cfg.withdraw_start_year && invest > 0) {
       const want = cfg.withdraw_mode === 'rate'
         ? invest * (cfg.withdraw_value / 100) // その年の投資残高に対する率
         : cfg.withdraw_value * infl // 定額は現在価格なのでその年の物価に換算

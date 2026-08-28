@@ -38,6 +38,8 @@ export default function Lifeplan() {
   // 編集中の下書き（null = 閲覧モード）。originalName が null なら新規作成
   const [edit, setEdit] = useState<{ draft: LifeplanConfig; originalName: string | null } | null>(null)
   const [survey, setSurvey] = useState(false) // アンケート画面
+  // グラフに何歳まで（生年が無ければ何年後まで）表示するか。'all' = 80年後まで
+  const [maxAge, setMaxAge] = useState<number | 'all'>(100)
   const [renaming, setRenaming] = useState<{ from: string; to: string } | null>(null)
 
   const persons = useMemo(() => {
@@ -212,10 +214,6 @@ export default function Lifeplan() {
     cfg.adults.find((a) => a.name === headPerson && a.birth_year) ??
     cfg.adults.find((a) => a.birth_year) ??
     cfg.adults[0]
-  const labels = result.rows.map((r) => {
-    const age = head?.birth_year ? `(${r.year - head.birth_year})` : ''
-    return `${r.year}${age}`
-  })
   const tickOpts = { maxTicksLimit: 9, maxRotation: 0 as const }
 
   const deleteScenario = async (name: string) => {
@@ -256,6 +254,33 @@ export default function Lifeplan() {
   const nameA = planA
   const nameB = planB
   const lastA = rA.rows[rA.rows.length - 1]
+
+  // ---- グラフの表示範囲（5年ごとのサマリ・ライフイベント年表は対象外で常に全期間） ----
+  const headAgeNow = head?.birth_year ? thisYear - head.birth_year : null
+  /** 生年があれば年齢のプリセット、無ければ「◯年後」のプリセット */
+  const rangePresets: Array<{ value: number | 'all'; label: string }> =
+    headAgeNow !== null
+      ? [
+          ...[70, 80, 90, 100].filter((a) => a > headAgeNow + 4).map((a) => ({ value: a as number | 'all', label: `${a}歳まで` })),
+          { value: 'all' as const, label: '全期間' },
+        ]
+      : [
+          { value: 30, label: '30年後まで' },
+          { value: 50, label: '50年後まで' },
+          { value: 'all' as const, label: '全期間' },
+        ]
+  const maxIdx = (() => {
+    if (maxAge === 'all') return 80
+    const idx = headAgeNow !== null ? maxAge - headAgeNow : maxAge
+    return Math.max(4, Math.min(80, idx))
+  })()
+  const viewRows = rA.rows.slice(0, maxIdx + 1)
+  const viewRowsB = resultB ? resultB.rows.slice(0, maxIdx + 1) : null
+
+  const labels = viewRows.map((r) => {
+    const age = head?.birth_year ? `(${r.year - head.birth_year})` : ''
+    return `${r.year}${age}`
+  })
   const lastB = resultB?.rows[resultB.rows.length - 1]
   const A_COLOR = '#38bdf8'
   const B_COLOR = '#fbbf24'
@@ -568,6 +593,20 @@ export default function Lifeplan() {
       </div>
       </details>
 
+      {/* グラフの表示範囲。ホームの期間バーと同じくヘッダー直下に貼り付いて追従する */}
+      <div className="card period-picker">
+        <div className="seg">
+          {rangePresets.map((p) => (
+            <button key={String(p.value)} className={maxAge === p.value ? 'on' : ''} onClick={() => setMaxAge(p.value)}>{p.label}</button>
+          ))}
+        </div>
+        <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+          グラフの表示: {thisYear}〜{thisYear + maxIdx}年
+          {head?.birth_year ? `（${head.name} ${thisYear - head.birth_year}〜${thisYear + maxIdx - head.birth_year}歳）` : ''}
+          ／ 5年ごとのサマリとライフイベント年表は全期間のまま
+        </p>
+      </div>
+
       <div className="card">
         <h2>
           総資産の推移: {nameA}{nameB ? ` vs ${nameB}` : ''}（{thisYear}〜{thisYear + 80}年）
@@ -589,10 +628,10 @@ export default function Lifeplan() {
             data={{
               labels,
               datasets: [
-                { label: `A: ${nameA}`, data: rA.rows.map((r) => r.assetsNominal), borderColor: A_COLOR, tension: 0.2, pointRadius: 0 },
+                { label: `A: ${nameA}`, data: viewRows.map((r) => r.assetsNominal), borderColor: A_COLOR, tension: 0.2, pointRadius: 0 },
                 ...(resultB
-                  ? [{ label: `B: ${nameB}`, data: resultB.rows.map((r) => r.assetsNominal), borderColor: B_COLOR, borderDash: [8, 4], tension: 0.2, pointRadius: 0 }]
-                  : [{ label: '実質資産（今の価値）', data: rA.rows.map((r) => r.assetsReal), borderColor: '#c084fc', borderDash: [6, 4], tension: 0.2, pointRadius: 0 }]),
+                  ? [{ label: `B: ${nameB}`, data: viewRowsB!.map((r) => r.assetsNominal), borderColor: B_COLOR, borderDash: [8, 4], tension: 0.2, pointRadius: 0 }]
+                  : [{ label: '実質資産（今の価値）', data: viewRows.map((r) => r.assetsReal), borderColor: '#c084fc', borderDash: [6, 4], tension: 0.2, pointRadius: 0 }]),
               ],
             }}
             options={{
@@ -628,8 +667,8 @@ export default function Lifeplan() {
             data={{
               labels,
               datasets: [
-                { type: 'bar' as const, label: '投資分', data: rA.rows.map((r) => r.assetsInvest), backgroundColor: '#38bdf8', stack: 'a' },
-                { type: 'bar' as const, label: '現金分', data: rA.rows.map((r) => r.assetsNominal - r.assetsInvest), backgroundColor: '#94a3b8', stack: 'a' },
+                { type: 'bar' as const, label: '投資分', data: viewRows.map((r) => r.assetsInvest), backgroundColor: '#38bdf8', stack: 'a' },
+                { type: 'bar' as const, label: '現金分', data: viewRows.map((r) => r.assetsNominal - r.assetsInvest), backgroundColor: '#94a3b8', stack: 'a' },
               ],
             }}
             options={{
@@ -654,10 +693,10 @@ export default function Lifeplan() {
             data={{
               labels,
               datasets: [
-                { type: 'bar' as const, label: '給与', data: rA.rows.map((r) => r.salary), backgroundColor: '#4ade80', stack: 'income' },
-                { type: 'bar' as const, label: '年金', data: rA.rows.map((r) => r.pension), backgroundColor: '#2dd4bf', stack: 'income' },
-                { type: 'bar' as const, label: '支出', data: rA.rows.map((r) => -r.expense), backgroundColor: '#f87171', stack: 'expense' },
-                { type: 'line' as const, label: 'うち子供費用', data: rA.rows.map((r) => -r.childCost), borderColor: '#fbbf24', pointRadius: 0, tension: 0.2, stack: 'child' },
+                { type: 'bar' as const, label: '給与', data: viewRows.map((r) => r.salary), backgroundColor: '#4ade80', stack: 'income' },
+                { type: 'bar' as const, label: '年金', data: viewRows.map((r) => r.pension), backgroundColor: '#2dd4bf', stack: 'income' },
+                { type: 'bar' as const, label: '支出', data: viewRows.map((r) => -r.expense), backgroundColor: '#f87171', stack: 'expense' },
+                { type: 'line' as const, label: 'うち子供費用', data: viewRows.map((r) => -r.childCost), borderColor: '#fbbf24', pointRadius: 0, tension: 0.2, stack: 'child' },
               ],
             }}
             options={{
@@ -686,9 +725,9 @@ export default function Lifeplan() {
             data={{
               labels,
               datasets: [
-                { type: 'bar' as const, label: '基本生活費', data: rA.rows.map((r) => r.living), backgroundColor: '#fb923c', stack: 'e' },
-                { type: 'bar' as const, label: '子供費用', data: rA.rows.map((r) => r.childCost), backgroundColor: '#fbbf24', stack: 'e' },
-                { type: 'bar' as const, label: 'その他（カスタム・住宅）', data: rA.rows.map((r) => r.expense - r.living - r.childCost), backgroundColor: '#c084fc', stack: 'e' },
+                { type: 'bar' as const, label: '基本生活費', data: viewRows.map((r) => r.living), backgroundColor: '#fb923c', stack: 'e' },
+                { type: 'bar' as const, label: '子供費用', data: viewRows.map((r) => r.childCost), backgroundColor: '#fbbf24', stack: 'e' },
+                { type: 'bar' as const, label: 'その他（カスタム・住宅）', data: viewRows.map((r) => r.expense - r.living - r.childCost), backgroundColor: '#c084fc', stack: 'e' },
               ],
             }}
             options={{

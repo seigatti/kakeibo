@@ -370,6 +370,48 @@ button {
   box-shadow: 0 6px 12px -6px rgba(0, 0, 0, 0.6);
 }
 
+/* プランの表示範囲バーは、ヘッダーに貼り付いている間だけ「直接入力」1行に縮める。
+   プリセットが2段に折り返すぶん、そのままだとグラフの領域を大きく削ってしまうため。
+   要素はJSXから消さずCSSで隠すので、入力中のフォーカスと入力値はそのまま保たれる。 */
+.period-picker.slim {
+  padding: 8px 14px;
+}
+
+.period-picker.slim > *:not(.range-row),
+.period-picker.slim .range-row > *:not(.range-input) {
+  display: none;
+}
+
+/* 比較トグルの display は CSS 側に置く。インライン style だと上の display:none に勝ってしまうため */
+.period-picker .bench-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.period-picker.slim .range-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.period-picker.slim .range-input input {
+  width: 5em;
+  margin-top: 0;
+  padding: 6px 8px;
+  text-align: center;
+}
+
+/* 「歳まで」は縮小時だけ添える */
+.period-picker .unit {
+  display: none;
+}
+
+.period-picker.slim .unit {
+  display: inline;
+}
+
 /* ホームのグラフ折りたたみセクション */
 .graph-section > summary {
   cursor: pointer;

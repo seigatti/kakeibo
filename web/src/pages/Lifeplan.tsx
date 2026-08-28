@@ -43,6 +43,7 @@ export default function Lifeplan() {
   const [maxAge, setMaxAge] = useState(100)
   const [maxAgeText, setMaxAgeText] = useState('100')
   const [showBenchmark, setShowBenchmark] = useState(true) // 年齢別の平均と比較
+  const [rangeStuck, setRangeStuck] = useState(false) // 表示範囲バーがヘッダーに貼り付いているか
   const [renaming, setRenaming] = useState<{ from: string; to: string } | null>(null)
 
   const persons = useMemo(() => {
@@ -76,6 +77,31 @@ export default function Lifeplan() {
     void persistScenarios([{ name: 'マイプラン', config: saved.adults.length ? saved : { ...saved, adults: persons.map(NEW_ADULT) } }])
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, scenarios, persons])
+
+  // 表示範囲バーがヘッダーに貼り付いたら、直接入力の1行だけに縮める（グラフの領域を稼ぐ）。
+  // バー自身ではなく直前のセンチネルを見るのは、縮むとバーの高さが変わって判定が振動するため。
+  // --header-h は App.tsx が実測して入れている。スクロール中の再計算は避けて resize 時だけ読む。
+  const stickRef = useRef<HTMLDivElement | null>(null)
+  const headerHRef = useRef(0)
+  const checkStuck = () => {
+    const el = stickRef.current
+    if (el) setRangeStuck(el.getBoundingClientRect().top <= headerHRef.current + 0.5)
+  }
+  useEffect(() => {
+    const measure = () => {
+      headerHRef.current = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--header-h')) || 0
+      checkStuck()
+    }
+    measure()
+    window.addEventListener('scroll', checkStuck, { passive: true })
+    window.addEventListener('resize', measure)
+    return () => {
+      window.removeEventListener('scroll', checkStuck)
+      window.removeEventListener('resize', measure)
+    }
+    // 参照するのは ref と setState だけなので、初回のクロージャを使い回して問題ない
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // 表示対象（A）の既定は先頭のシナリオ
   useEffect(() => {
@@ -598,25 +624,28 @@ export default function Lifeplan() {
       </div>
       </details>
 
-      {/* グラフの表示範囲。ホームの期間バーと同じくヘッダー直下に貼り付いて追従する */}
-      <div className="card period-picker">
+      {/* グラフの表示範囲。ホームの期間バーと同じくヘッダー直下に貼り付いて追従するが、
+          貼り付いている間は「直接入力」1行に縮める（.slim）。センチネルで貼り付きを検知する */}
+      <div ref={(el) => { stickRef.current = el; if (el) checkStuck() }} />
+      <div className={rangeStuck ? 'card period-picker slim' : 'card period-picker'}>
         <div className="seg" style={{ flexWrap: 'wrap' }}>
           {rangePresets.map((p) => (
             <button key={p.value} style={{ flex: '1 0 22%' }} className={maxAge === p.value ? 'on' : ''} onClick={() => applyRange(p.value)}>{p.label}</button>
           ))}
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap' }}>
-          <label className="field" style={{ marginBottom: 0, flex: '1 1 150px' }}>
-            {headAgeNow !== null ? `直接入力（${rangeMin}〜${rangeMax}歳）` : `直接入力（1〜80年後）`}
+        <div className="range-row" style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap' }}>
+          <label className="field range-input" style={{ marginBottom: 0, flex: '1 1 150px' }}>
+            {rangeStuck ? '表示範囲' : headAgeNow !== null ? `直接入力（${rangeMin}〜${rangeMax}歳）` : `直接入力（1〜80年後）`}
             <input type="text" inputMode="numeric" value={maxAgeText}
               onChange={(e) => {
                 setMaxAgeText(e.target.value)
                 const n = Number(e.target.value)
                 if (e.target.value.trim() !== '' && Number.isFinite(n)) setMaxAge(clampRange(n))
               }}
-              onBlur={(e) => applyRange(Number(e.target.value) || maxAge)} /></label>
+              onBlur={(e) => applyRange(Number(e.target.value) || maxAge)} />
+            <span className="unit">{headAgeNow !== null ? '歳まで' : '年後まで'}</span></label>
           {head?.birth_year && (
-            <label className="field" style={{ marginBottom: 0, flex: '1 1 170px', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <label className="field bench-toggle" style={{ marginBottom: 0, flex: '1 1 170px' }}>
               <input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={showBenchmark} onChange={(e) => setShowBenchmark(e.target.checked)} />
               年齢別の平均と比較
             </label>

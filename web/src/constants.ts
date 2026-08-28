@@ -9,7 +9,7 @@
  */
 
 export type ConstUnit = '円' | '%' | '歳' | '倍'
-export type ConstGroup = '年金（想定）' | '子供費用' | '児童手当' | 'マイホーム' | '税制・ふるさと納税' | 'ライフプランの標準値'
+export type ConstGroup = '年金（想定）' | '子供費用' | '児童手当' | 'マイホーム' | '税制・ふるさと納税' | 'ライフプランの標準値' | '年齢別の平均（比較用）'
 
 export interface ConstDef {
   key: string
@@ -37,6 +37,8 @@ const SRC = {
   boj: { label: '日本銀行「物価安定の目標」', url: 'https://www.boj.or.jp/mopo/outline/qqe.htm' },
   mhlw_kensho: { label: '厚生労働省「財政検証・マクロ経済スライド」', url: 'https://www.mhlw.go.jp/stf/seisakunitsuite/bunya/nenkin/nenkin/zaisei-kensyo/index.html' },
   kakei: { label: '総務省統計局「家計調査」（高齢無職世帯の消費支出）', url: 'https://www.stat.go.jp/data/kakei/index.html' },
+  kokumin: { label: '厚生労働省「国民生活基礎調査」（世帯主の年齢階級別 平均所得金額）', url: 'https://www.mhlw.go.jp/toukei/list/20-21.html' },
+  kakei_savings: { label: '総務省統計局「家計調査（貯蓄・負債編）」（世帯主の年齢階級別 貯蓄現在高・二人以上世帯）', url: 'https://www.stat.go.jp/data/sav/index.html' },
 } as const
 
 export const CONSTANTS: ConstDef[] = [
@@ -98,6 +100,19 @@ export const CONSTANTS: ConstDef[] = [
   { key: 'std_invest_return', group: 'ライフプランの標準値', label: '標準の運用利回り', unit: '%', default: 3, source: SRC.boj, reviewYear: 2026, annual: false, note: '長期分散投資の控えめな目安' },
   { key: 'std_invest_ratio', group: 'ライフプランの標準値', label: '標準の「収入のうち投資へ回す割合」', unit: '%', default: 20, source: SRC.kakei, reviewYear: 2026, annual: false },
   { key: 'std_retire_age', group: 'ライフプランの標準値', label: '標準の退職年齢', unit: '歳', default: 65, source: SRC.pension, reviewYear: 2026, annual: false },
+
+  // ---- 年齢別の平均（グラフに重ねる比較線の基準値） ----
+  { key: 'avg_income_20s', group: '年齢別の平均（比較用）', label: '平均世帯年収 29歳以下（額面）', unit: '円', default: 3_800_000, source: SRC.kokumin, reviewYear: 2026, annual: true, note: '平均は高所得世帯に引っ張られるため中央値はこれより低い。額面（税・社保の控除前）' },
+  { key: 'avg_income_30s', group: '年齢別の平均（比較用）', label: '平均世帯年収 30〜39歳（額面）', unit: '円', default: 6_200_000, source: SRC.kokumin, reviewYear: 2026, annual: true, note: '平均は高所得世帯に引っ張られるため中央値はこれより低い。額面（税・社保の控除前）' },
+  { key: 'avg_income_40s', group: '年齢別の平均（比較用）', label: '平均世帯年収 40〜49歳（額面）', unit: '円', default: 7_250_000, source: SRC.kokumin, reviewYear: 2026, annual: true, note: '平均は高所得世帯に引っ張られるため中央値はこれより低い。額面（税・社保の控除前）' },
+  { key: 'avg_income_50s', group: '年齢別の平均（比較用）', label: '平均世帯年収 50〜59歳（額面）', unit: '円', default: 7_820_000, source: SRC.kokumin, reviewYear: 2026, annual: true, note: '平均は高所得世帯に引っ張られるため中央値はこれより低い。額面（税・社保の控除前）' },
+  { key: 'avg_income_60s', group: '年齢別の平均（比較用）', label: '平均世帯年収 60〜69歳（額面）', unit: '円', default: 5_490_000, source: SRC.kokumin, reviewYear: 2026, annual: true, note: '平均は高所得世帯に引っ張られるため中央値はこれより低い。額面（税・社保の控除前）' },
+  { key: 'avg_income_70plus', group: '年齢別の平均（比較用）', label: '平均世帯年収 70歳以上（額面）', unit: '円', default: 3_940_000, source: SRC.kokumin, reviewYear: 2026, annual: true, note: '平均は高所得世帯に引っ張られるため中央値はこれより低い。額面（税・社保の控除前）' },
+  { key: 'avg_assets_u40', group: '年齢別の平均（比較用）', label: '平均世帯貯蓄 40歳未満', unit: '円', default: 7_800_000, source: SRC.kakei_savings, reviewYear: 2026, annual: true, note: '貯蓄現在高（不動産を含まない）。平均は高資産世帯に引っ張られるため中央値はこれより低い' },
+  { key: 'avg_assets_40s', group: '年齢別の平均（比較用）', label: '平均世帯貯蓄 40〜49歳', unit: '円', default: 12_080_000, source: SRC.kakei_savings, reviewYear: 2026, annual: true, note: '貯蓄現在高（不動産を含まない）。平均は高資産世帯に引っ張られるため中央値はこれより低い' },
+  { key: 'avg_assets_50s', group: '年齢別の平均（比較用）', label: '平均世帯貯蓄 50〜59歳', unit: '円', default: 17_050_000, source: SRC.kakei_savings, reviewYear: 2026, annual: true, note: '貯蓄現在高（不動産を含まない）。平均は高資産世帯に引っ張られるため中央値はこれより低い' },
+  { key: 'avg_assets_60s', group: '年齢別の平均（比較用）', label: '平均世帯貯蓄 60〜69歳', unit: '円', default: 24_320_000, source: SRC.kakei_savings, reviewYear: 2026, annual: true, note: '貯蓄現在高（不動産を含まない）。平均は高資産世帯に引っ張られるため中央値はこれより低い' },
+  { key: 'avg_assets_70plus', group: '年齢別の平均（比較用）', label: '平均世帯貯蓄 70歳以上', unit: '円', default: 25_030_000, source: SRC.kakei_savings, reviewYear: 2026, annual: true, note: '貯蓄現在高（不動産を含まない）。平均は高資産世帯に引っ張られるため中央値はこれより低い' },
 ]
 
 const DEFAULTS: Record<string, number> = Object.fromEntries(CONSTANTS.map((c) => [c.key, c.default]))

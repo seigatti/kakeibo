@@ -17,6 +17,7 @@ import {
   type LifeplanChild,
   type LifeplanConfig,
 } from '../lifeplan'
+import { benchmarkSeries } from '../lifeplanBenchmark'
 import { diagnoseScenario } from '../lifeplanDiagnosis'
 import LifeplanEditor from './LifeplanEditor'
 import ScenarioSurveyCard from './ScenarioSurveyCard'
@@ -38,8 +39,10 @@ export default function Lifeplan() {
   // 編集中の下書き（null = 閲覧モード）。originalName が null なら新規作成
   const [edit, setEdit] = useState<{ draft: LifeplanConfig; originalName: string | null } | null>(null)
   const [survey, setSurvey] = useState(false) // アンケート画面
-  // グラフに何歳まで（生年が無ければ何年後まで）表示するか。'all' = 80年後まで
-  const [maxAge, setMaxAge] = useState<number | 'all'>(100)
+  // グラフに何歳まで（生年が無ければ何年後まで）表示するか
+  const [maxAge, setMaxAge] = useState(100)
+  const [maxAgeText, setMaxAgeText] = useState('100')
+  const [showBenchmark, setShowBenchmark] = useState(true) // 年齢別の平均と比較
   const [renaming, setRenaming] = useState<{ from: string; to: string } | null>(null)
 
   const persons = useMemo(() => {
@@ -257,25 +260,27 @@ export default function Lifeplan() {
 
   // ---- グラフの表示範囲（5年ごとのサマリ・ライフイベント年表は対象外で常に全期間） ----
   const headAgeNow = head?.birth_year ? thisYear - head.birth_year : null
-  /** 生年があれば年齢のプリセット、無ければ「◯年後」のプリセット */
-  const rangePresets: Array<{ value: number | 'all'; label: string }> =
+  /** 生年があれば年齢のプリセット、無ければ「◯年後」のプリセット（いずれも先の分だけ） */
+  const rangePresets: Array<{ value: number; label: string }> =
     headAgeNow !== null
-      ? [
-          ...[70, 80, 90, 100].filter((a) => a > headAgeNow + 4).map((a) => ({ value: a as number | 'all', label: `${a}歳まで` })),
-          { value: 'all' as const, label: '全期間' },
-        ]
-      : [
-          { value: 30, label: '30年後まで' },
-          { value: 50, label: '50年後まで' },
-          { value: 'all' as const, label: '全期間' },
-        ]
-  const maxIdx = (() => {
-    if (maxAge === 'all') return 80
-    const idx = headAgeNow !== null ? maxAge - headAgeNow : maxAge
-    return Math.max(4, Math.min(80, idx))
-  })()
+      ? [40, 50, 60, 70, 80, 90, 100].filter((a) => a > headAgeNow).map((a) => ({ value: a, label: `${a}歳` }))
+      : [10, 20, 30, 50, 80].map((y) => ({ value: y, label: `${y}年後` }))
+  const rangeMin = headAgeNow !== null ? headAgeNow + 1 : 1
+  const rangeMax = headAgeNow !== null ? headAgeNow + 80 : 80
+  const clampRange = (v: number) => Math.max(rangeMin, Math.min(rangeMax, v))
+  const applyRange = (v: number) => {
+    const c = clampRange(v)
+    setMaxAge(c)
+    setMaxAgeText(String(c))
+  }
+  const maxIdx = Math.max(1, Math.min(80, headAgeNow !== null ? maxAge - headAgeNow : maxAge))
   const viewRows = rA.rows.slice(0, maxIdx + 1)
   const viewRowsB = resultB ? resultB.rows.slice(0, maxIdx + 1) : null
+  // 年齢別の平均（世間との比較線）。現在価格の統計をインフレで名目化して重ねる
+  const benchmark =
+    showBenchmark && head?.birth_year
+      ? benchmarkSeries(viewRows.map((r) => r.year), head.birth_year, cfg.inflation, thisYear)
+      : null
 
   const labels = viewRows.map((r) => {
     const age = head?.birth_year ? `(${r.year - head.birth_year})` : ''
@@ -595,12 +600,29 @@ export default function Lifeplan() {
 
       {/* グラフの表示範囲。ホームの期間バーと同じくヘッダー直下に貼り付いて追従する */}
       <div className="card period-picker">
-        <div className="seg">
+        <div className="seg" style={{ flexWrap: 'wrap' }}>
           {rangePresets.map((p) => (
-            <button key={String(p.value)} className={maxAge === p.value ? 'on' : ''} onClick={() => setMaxAge(p.value)}>{p.label}</button>
+            <button key={p.value} style={{ flex: '1 0 22%' }} className={maxAge === p.value ? 'on' : ''} onClick={() => applyRange(p.value)}>{p.label}</button>
           ))}
         </div>
-        <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap' }}>
+          <label className="field" style={{ marginBottom: 0, flex: '1 1 150px' }}>
+            {headAgeNow !== null ? `直接入力（${rangeMin}〜${rangeMax}歳）` : `直接入力（1〜80年後）`}
+            <input type="text" inputMode="numeric" value={maxAgeText}
+              onChange={(e) => {
+                setMaxAgeText(e.target.value)
+                const n = Number(e.target.value)
+                if (e.target.value.trim() !== '' && Number.isFinite(n)) setMaxAge(clampRange(n))
+              }}
+              onBlur={(e) => applyRange(Number(e.target.value) || maxAge)} /></label>
+          {head?.birth_year && (
+            <label className="field" style={{ marginBottom: 0, flex: '1 1 170px', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={showBenchmark} onChange={(e) => setShowBenchmark(e.target.checked)} />
+              年齢別の平均と比較
+            </label>
+          )}
+        </div>
+        <p className="muted" style={{ fontSize: 12, margin: '8px 0 0' }}>
           グラフの表示: {thisYear}〜{thisYear + maxIdx}年
           {head?.birth_year ? `（${head.name} ${thisYear - head.birth_year}〜${thisYear + maxIdx - head.birth_year}歳）` : ''}
           ／ 5年ごとのサマリとライフイベント年表は全期間のまま
@@ -613,7 +635,9 @@ export default function Lifeplan() {
           <HelpTip title="総資産の計算">
             毎年: 投資分 ×= (1＋運用利回り)、現金分 += 収入 − 支出。資産合計 = 投資分＋現金分。収入=給与・年金・カスタム収入・住宅ローン控除、支出=基本生活費＋子供費用＋カスタム支出＋住宅（毎年インフレ率分増加、住宅は実額）。<br />
             実質資産 = 名目資産 ÷ (1＋インフレ率)^経過年（今の価値に換算した「目減り後」の額）。<br />
-            名目資産が減らない場合は運用益が収支の赤字を上回っています（運用利回り0で収支のみの推移を確認可）。
+            名目資産が減らない場合は運用益が収支の赤字を上回っています（運用利回り0で収支のみの推移を確認可）。            <br />緑の点線は<b>年齢別の平均世帯貯蓄</b>（総務省 家計調査・二人以上世帯）。名目のグラフと比べられるよう
+            インフレ率{cfg.inflation}%で換算しています。<b>平均は高資産世帯に引っ張られるため中央値はこれより低め</b>で、
+            統計は貯蓄現在高なので不動産は含みません。金額は設定タブの「計算の基準値 → 年齢別の平均（比較用）」で変更できます。
           </HelpTip>
         </h2>
         <div style={{ marginBottom: 6 }}>
@@ -632,6 +656,13 @@ export default function Lifeplan() {
                 ...(resultB
                   ? [{ label: `B: ${nameB}`, data: viewRowsB!.map((r) => r.assetsNominal), borderColor: B_COLOR, borderDash: [8, 4], tension: 0.2, pointRadius: 0 }]
                   : [{ label: '実質資産（今の価値）', data: viewRows.map((r) => r.assetsReal), borderColor: '#c084fc', borderDash: [6, 4], tension: 0.2, pointRadius: 0 }]),
+                ...(benchmark
+                  ? [{
+                      label: `年齢別の平均世帯貯蓄（インフレ${cfg.inflation}%換算）`,
+                      data: benchmark.map((p) => p.assets),
+                      borderColor: '#a3e635', borderDash: [2, 3], tension: 0.2, pointRadius: 0,
+                    }]
+                  : []),
               ],
             }}
             options={{
@@ -684,7 +715,9 @@ export default function Lifeplan() {
         <h2>
           年間の収入と支出（名目）: {nameA}
           <HelpTip title="このグラフの構成">
-            上向きバー = 収入（緑=給与、青緑=年金）。下向きバー = 支出（基本生活費＋子供費用＋カスタム支出）。黄線 = 支出のうち子供費用（児童手当差引後）。
+            上向きバー = 収入（緑=給与、青緑=年金）。下向きバー = 支出（基本生活費＋子供費用＋カスタム支出）。黄線 = 支出のうち子供費用（児童手当差引後）。            <br />青の点線は<b>年齢別の平均世帯年収</b>（厚労省 国民生活基礎調査）。このグラフの給与は手取りなので、
+            平均も<b>手取り換算</b>したうえでインフレ率{cfg.inflation}%で名目に換算して重ねています。
+            <b>平均は高所得世帯に引っ張られるため中央値はこれより低め</b>です。金額は設定タブの「計算の基準値」で変更できます。
           </HelpTip>
         </h2>
         <div className="chart-box">
@@ -697,6 +730,14 @@ export default function Lifeplan() {
                 { type: 'bar' as const, label: '年金', data: viewRows.map((r) => r.pension), backgroundColor: '#2dd4bf', stack: 'income' },
                 { type: 'bar' as const, label: '支出', data: viewRows.map((r) => -r.expense), backgroundColor: '#f87171', stack: 'expense' },
                 { type: 'line' as const, label: 'うち子供費用', data: viewRows.map((r) => -r.childCost), borderColor: '#fbbf24', pointRadius: 0, tension: 0.2, stack: 'child' },
+                ...(benchmark
+                  ? [{
+                      type: 'line' as const,
+                      label: `年齢別の平均世帯年収・手取り換算（インフレ${cfg.inflation}%換算）`,
+                      data: benchmark.map((p) => p.incomeNet),
+                      borderColor: '#60a5fa', borderDash: [2, 3], pointRadius: 0, tension: 0.2, stack: 'bench',
+                    }]
+                  : []),
               ],
             }}
             options={{

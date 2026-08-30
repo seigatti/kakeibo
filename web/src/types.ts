@@ -62,6 +62,8 @@ export interface FurusatoItem {
   application_method: string | null
   receipt_status: string | null
   memo: string | null
+  market_price: number | null // 市場価格（Amazon等の相場）。還元率 = market_price ÷ price
+  priority: number | null // 優先度 1〜5（5が最高）。未設定は3扱い
 }
 
 export interface FurusatoYear {

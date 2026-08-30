@@ -59,3 +59,28 @@ if(!w)location.href=u;
 })()`
   return 'javascript:' + encodeURIComponent(code.replace(/\n/g, ''))
 }
+
+export function marketPriceBookmarklet(appUrl: string): string {
+  // Amazon/楽天市場などの商品ページ・検索結果ページから価格を読み取り、
+  // ふるさと納税タブへ「市場価格」として渡す（アプリ側で対象の返礼品の編集画面が開く）
+  const code = `(()=>{
+var p='';
+var pick=function(sel){var e=document.querySelector(sel);if(!e)return '';var t=(e.getAttribute('content')||e.textContent||'').replace(/[^0-9]/g,'');return t.length>=3?t:''};
+p=pick('.a-price .a-offscreen')||pick('[itemprop=price]');
+if(!p){
+var c=[];
+document.querySelectorAll('[class*=price],[class*=Price]').forEach(function(e){
+var m=(e.textContent||'').match(/([0-9][0-9,]{2,})/);if(m)c.push(Number(m[1].replace(/,/g,'')));});
+if(c.length)p=String(Math.min.apply(null,c));}
+if(!p){
+var all=[],re=/([0-9][0-9,]{2,})\\s*円/g,m2;
+while((m2=re.exec(document.body.innerText)))all.push(Number(m2[1].replace(/,/g,'')));
+if(all.length)p=String(Math.min.apply(null,all));}
+if(!p)p=(prompt('価格を自動検出できませんでした。市場価格を貼り付けてください','')||'').replace(/[^0-9]/g,'');
+if(!p)return;
+var u='${appUrl}#furusato?market='+p;
+var w=window.open(u,'_blank');
+if(!w)location.href=u;
+})()`
+  return 'javascript:' + encodeURIComponent(code.replace(/\n/g, ''))
+}

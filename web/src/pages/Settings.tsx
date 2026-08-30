@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { fetchAll } from '../api'
-import { appBaseUrl, mfBookmarklet, rakutenBookmarklet, zaimBookmarklet } from '../bookmarklets'
+import { appBaseUrl, marketPriceBookmarklet, mfBookmarklet, rakutenBookmarklet, zaimBookmarklet } from '../bookmarklets'
 import ConstantsEditor from '../components/ConstantsEditor'
 import PersonEditor from '../components/PersonEditor'
 import { useStore } from '../store'
@@ -100,6 +100,16 @@ export default function Settings() {
         </button>
         <p className="muted" style={{ fontSize: 12 }}>
           楽天の商品ページを開いた状態でクリックすると、ふるさとタブに商品情報が入力された状態で開きます（自動保存はされないので内容を確認して追加）。
+        </p>
+        <p style={{ fontSize: 13, margin: '12px 0 4px' }}>💰 返礼品の相場取得（還元率の計算用）</p>
+        <code className="wrap">{marketPriceBookmarklet(base)}</code>
+        <button className="btn secondary small" style={{ marginTop: 6 }} onClick={() => void copy('market', marketPriceBookmarklet(base))}>
+          {copied === 'market' ? 'コピーしました ✓' : 'コピー'}
+        </button>
+        <p className="muted" style={{ fontSize: 12 }}>
+          ふるさとタブで返礼品を編集 →「Amazonで相場を調べる」で検索ページを開き、そのページでこれをクリックすると、
+          読み取った価格が<b>市場価格</b>として入った編集画面が開きます（還元率＝市場価格÷寄付金額）。
+          検索結果ページでは<b>最安値</b>を拾います。
         </p>
         <p className="muted" style={{ fontSize: 12 }}>
           ※ページの作りが変わると自動検出できなくなることがあります。その場合は金額の貼り付けを求められます。

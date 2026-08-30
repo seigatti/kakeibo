@@ -531,3 +531,56 @@ code.wrap {
   max-height: 120px;
   overflow-y: auto;
 }
+
+/* ---- モーダル（ふるさとの追加・編集） ---- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 40; /* メモウィンドウ(50)より下・ヘッダー(10)より上 */
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 16px 12px calc(env(safe-area-inset-bottom) + 16px);
+  overflow-y: auto;
+}
+
+.modal {
+  width: 100%;
+  max-width: 640px;
+  max-height: none;
+  margin: auto;
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.modal-head h2 {
+  margin: 0;
+}
+
+.modal-close {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+  padding: 4px 8px;
+  cursor: pointer;
+  width: auto;
+}
+
+/* ---- ステータスなどの小さいピル ---- */
+.badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: nowrap;
+}

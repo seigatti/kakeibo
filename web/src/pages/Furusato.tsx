@@ -1,21 +1,67 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
-import { APPLICATION_METHODS, APPLICATION_STATUSES, DEFAULT_PERSONS, type FurusatoItem, type FurusatoPerson } from '../types'
+import { APPLICATION_STATUSES, DEFAULT_PERSONS, type FurusatoItem, type FurusatoPerson } from '../types'
 import { amt, estimateSalary, furusatoLimitDetailed, parseBonusConfig, parseProfile, yen } from '../utils'
+import { getConst } from '../constants'
+import {
+  EMPTY_FILTER,
+  PICK_MODES,
+  averageRate,
+  filterItems,
+  isFilterActive,
+  pickCandidates,
+  priorityOf,
+  returnRate,
+  toNum,
+  type ItemFilter,
+  type PickMode,
+} from '../furusato'
 import HelpTip from '../components/HelpTip'
 import ProfileCard from './ProfileCard'
+import FurusatoItemModal, { EMPTY_ITEM, rateTextOf, type ItemForm } from './FurusatoItemModal'
 
-const EMPTY_ITEM = {
-  id: '',
-  year: String(new Date().getFullYear()),
-  name: '',
-  price: '',
-  municipality: '',
-  url: '',
-  application_status: '未購入',
-  application_method: '',
-  receipt_status: '未',
-  memo: '',
+/** 申請状況の色。進み具合が一目で分かるよう グレー→オレンジ→アンバー→スカイ→グリーン と進める */
+const STATUS_COLORS: Record<string, string> = {
+  未購入: 'var(--muted)',
+  '購入済み、書類未': '#fb923c',
+  ワンストップ未: 'var(--amber)',
+  '手続き済、税額確認未': 'var(--accent)',
+  完了: 'var(--green)',
+}
+const statusColor = (s: string | null) => STATUS_COLORS[s ?? ''] ?? 'var(--muted)'
+
+/** 「相場を調べる」で開いた返礼品のid。別オリジンのページからは渡せないのでlocalStorage経由で受け渡す */
+const MARKET_TARGET_KEY = 'kakeibo.furusatoMarketTarget'
+
+/** シートの行を入力フォームの形に */
+function formOf(it: FurusatoItem): ItemForm {
+  const price = toNum(it.price)
+  const market = toNum(it.market_price)
+  return {
+    id: it.id,
+    year: toNum(it.year) ? String(toNum(it.year)) : '',
+    name: it.name,
+    price: price !== null ? String(price) : '',
+    municipality: it.municipality ?? '',
+    url: it.url ?? '',
+    application_status: it.application_status ?? '未購入',
+    application_method: it.application_method ?? '',
+    receipt_status: it.receipt_status === '済' ? '済' : '未',
+    memo: it.memo ?? '',
+    market_price: market !== null ? String(market) : '',
+    rate: rateTextOf(price !== null ? String(price) : '', market !== null ? String(market) : ''),
+    priority: String(priorityOf(it)),
+  }
+}
+
+/** 相場検索用に商品名を短く整える（【ふるさと納税】などの飾りを落とす） */
+export function marketQuery(name: string): string {
+  return name
+    .replace(/[【\[][^】\]]*[】\]]/g, ' ')
+    .replace(/ふるさと納税|返礼品|送料無料|訳あり/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 40)
 }
 
 export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
@@ -23,8 +69,13 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
   const [personState, setPersonState] = useState<FurusatoPerson>(localStorage.getItem('kakeibo.furusatoPerson') || '')
   const thisYear = new Date().getFullYear()
   const [year, setYear] = useState(thisYear)
-  const [form, setForm] = useState(EMPTY_ITEM)
+  const [form, setForm] = useState<ItemForm>(EMPTY_ITEM)
   const [editing, setEditing] = useState(false)
+  const [modalOpen, setModalOpen] = useState(false)
+  const [filter, setFilter] = useState<ItemFilter>(EMPTY_FILTER)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [pickMode, setPickMode] = useState<PickMode>('priority')
+  const [marginText, setMarginText] = useState('10000')
   const [yearForm, setYearForm] = useState({
     income: '', social_insurance: '', medical_deduction: '', limit_manual: '',
     life_paid: '', quake_paid: '', medical_paid: '',
@@ -32,7 +83,6 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
   const [msg, setMsg] = useState('')
   const [limitOpen, setLimitOpen] = useState(false)
   const appliedPrefill = useRef<string | null>(null)
-  const itemFormRef = useRef<HTMLDivElement>(null)
 
   // 管理者リスト（settings の furusato_persons、既定は せ,あ）
   const persons = useMemo(() => {
@@ -64,10 +114,30 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
     })
   }, [yearInfo])
 
-  // 楽天ブックマークレットからのプリフィル（#furusato?name=…&price=…&url=…&municipality=…）
+  // ブックマークレットからのプリフィル。いずれも保存はせず、確認できるよう編集モーダルを開く
+  //  ・楽天:   #furusato?name=…&price=…&url=…&municipality=…  → 新規追加として開く
+  //  ・相場:   #furusato?market=…                              → 直前に「相場を調べる」した返礼品を開く
   useEffect(() => {
     const key = prefill.toString()
     if (!key || appliedPrefill.current === key) return
+
+    const market = prefill.get('market')
+    if (market) {
+      appliedPrefill.current = key
+      const targetId = localStorage.getItem(MARKET_TARGET_KEY)
+      const target = targetId ? (data?.furusato_items ?? []).find((i) => String(i.id) === targetId) : undefined
+      if (target) {
+        setForm({ ...formOf(target), market_price: market, rate: rateTextOf(String(toNum(target.price) ?? ''), market) })
+        setEditing(true)
+        setModalOpen(true)
+        setMsg(`市場価格 ${amt(Number(market))} を読み取りました。内容を確認して保存してください`)
+      } else {
+        setMsg('相場の取り込み先が分かりませんでした。編集画面の「相場を調べる」から開き直してください')
+      }
+      history.replaceState(null, '', '#furusato')
+      return
+    }
+
     if (!prefill.get('name') && !prefill.get('url')) return
     appliedPrefill.current = key
     setForm({
@@ -80,10 +150,11 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
       application_status: '購入済み、書類未',
     })
     setEditing(false)
+    setModalOpen(true)
     setMsg('楽天ページから読み取りました。内容を確認して保存してください')
     history.replaceState(null, '', '#furusato')
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefill])
+  }, [prefill, data])
 
   const num = (s: string) => (s.trim() === '' ? null : Number(s.replace(/[,，]/g, '')))
 
@@ -129,6 +200,22 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
 
   const yearItems = items.filter((i) => Number(i.year) === year && i.application_status !== '未購入')
   const candidates = items.filter((i) => !i.year || i.application_status === '未購入')
+
+  // 検索（年をまたいで全件から絞り込む。条件が空なら通常の2リスト表示に戻す）
+  const searching = isFilterActive(filter)
+  const found = useMemo(() => filterItems(items, filter), [items, filter])
+
+  // 候補の自動提案。予算 = 採用上限 − 購入済み合計 − 安全マージン
+  const stdRate = getConst('furusato_std_rate') / 100
+  const margin = Math.max(0, num(marginText) ?? 0)
+  const budget = remaining !== null ? remaining - margin : null
+  const pick = useMemo(
+    () => (budget === null ? null : pickCandidates(candidates, budget, pickMode, stdRate)),
+    // candidates は毎回作り直されるので items ベースで依存を張る
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [items, budget, pickMode, stdRate],
+  )
+
   const allYears = [...new Set([thisYear, thisYear - 1, thisYear + 1, ...years.filter((y) => y.person === person).map((y) => Number(y.year)), ...items.map((i) => Number(i.year)).filter((y) => y > 2000)])].sort((a, b) => b - a)
 
   const saveYear = async () => {
@@ -169,29 +256,38 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
         application_method: form.application_method.trim() || null,
         receipt_status: form.receipt_status,
         memo: form.memo.trim() || null,
+        market_price: num(form.market_price),
+        priority: num(form.priority),
       },
     })
     setForm({ ...EMPTY_ITEM, year: String(year) })
     setEditing(false)
+    setModalOpen(false)
     setMsg(editing ? '更新しました ✓' : '追加しました ✓')
   }
 
   const editItem = (it: FurusatoItem) => {
-    setForm({
-      id: it.id,
-      year: it.year ? String(it.year) : '',
-      name: it.name,
-      price: it.price?.toString() ?? '',
-      municipality: it.municipality ?? '',
-      url: it.url ?? '',
-      application_status: it.application_status ?? '未購入',
-      application_method: it.application_method ?? '',
-      receipt_status: it.receipt_status ?? '未',
-      memo: it.memo ?? '',
-    })
+    setForm(formOf(it))
     setEditing(true)
-    // 「寄付を編集」カードの位置へスクロール（最上部ではなく）
-    itemFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    setModalOpen(true)
+    setMsg('')
+  }
+
+  const addItem = () => {
+    setForm({ ...EMPTY_ITEM, year: String(year) })
+    setEditing(false)
+    setModalOpen(true)
+    setMsg('')
+  }
+
+  // 相場検索: 商品名で検索ページを開き、どの返礼品向けかを控える
+  // （別オリジンのページからは渡せないので、ブックマークレットが戻ってきたときにここを見る）
+  const searchMarket = (site: 'amazon' | 'rakuten') => {
+    const q = encodeURIComponent(marketQuery(form.name))
+    if (form.id) localStorage.setItem(MARKET_TARGET_KEY, form.id)
+    else localStorage.removeItem(MARKET_TARGET_KEY)
+    const url = site === 'amazon' ? `https://www.amazon.co.jp/s?k=${q}` : `https://search.rakuten.co.jp/search/mall/${q}/`
+    window.open(url, '_blank', 'noopener')
   }
 
   const removeItem = async (it: FurusatoItem) => {
@@ -199,29 +295,37 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
     await mutate('deleteFurusatoItem', { id: it.id })
   }
 
-  const ItemList = ({ list }: { list: FurusatoItem[] }) => (
+  /** @param showYear 年をまたいで並べるとき（検索結果・候補）に対象年バッジを出す */
+  const ItemList = ({ list, showYear }: { list: FurusatoItem[]; showYear?: boolean }) => (
     <ul className="list">
-      {list.map((it) => (
-        <li key={it.id} style={{ flexWrap: 'wrap' }}>
-          <span style={{ flex: '1 1 100%', fontSize: 13 }}>
-            {it.url ? (
-              <a href={it.url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>{it.name.slice(0, 45)}{it.name.length > 45 ? '…' : ''}</a>
-            ) : (
-              <>{it.name.slice(0, 45)}</>
-            )}
-          </span>
-          <span className="muted" style={{ fontSize: 12, flex: 1 }}>
-            {it.municipality ?? ''} {it.price ? yen(it.price) : ''}
-            {' ・ '}
-            <span style={{ color: it.application_status === '完了' ? 'var(--green)' : it.application_status === '未購入' ? 'var(--muted)' : 'var(--amber)' }}>
-              {it.application_status}
+      {list.map((it) => {
+        const rate = returnRate(it)
+        const received = it.receipt_status === '済'
+        const y = toNum(it.year)
+        return (
+          <li key={it.id} style={{ flexWrap: 'wrap' }}>
+            <span style={{ flex: '1 1 100%', fontSize: 13 }}>
+              {it.url ? (
+                <a href={it.url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>{it.name.slice(0, 45)}{it.name.length > 45 ? '…' : ''}</a>
+              ) : (
+                <>{it.name.slice(0, 45)}{it.name.length > 45 ? '…' : ''}</>
+              )}
             </span>
-            {it.receipt_status === '済' ? ' ・ 受取済' : ''}
-          </span>
-          <button className="btn small secondary" onClick={() => editItem(it)}>編集</button>
-          <button className="btn danger small" onClick={() => void removeItem(it)}>削除</button>
-        </li>
-      ))}
+            <span style={{ flex: '1 1 100%', display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+              {showYear && <span className="badge" style={{ color: 'var(--muted)' }}>{y ? `${y}年` : '候補'}</span>}
+              <span className="badge" style={{ color: statusColor(it.application_status) }}>{it.application_status ?? '未購入'}</span>
+              <span className="badge" style={{ color: received ? 'var(--green)' : 'var(--red)' }}>{received ? '受取済' : '受取未'}</span>
+              {rate !== null && <span className="badge" style={{ color: 'var(--accent)' }}>還元 {Math.round(rate * 1000) / 10}%</span>}
+              <span className="badge" style={{ color: 'var(--muted)' }}>優先 {priorityOf(it)}</span>
+            </span>
+            <span className="muted" style={{ fontSize: 12, flex: 1 }}>
+              {it.municipality ?? ''} {toNum(it.price) !== null ? yen(toNum(it.price)!) : ''}
+            </span>
+            <button className="btn small secondary" onClick={() => editItem(it)}>編集</button>
+            <button className="btn danger small" onClick={() => void removeItem(it)}>削除</button>
+          </li>
+        )
+      })}
       {list.length === 0 && <li className="muted">なし</li>}
     </ul>
   )
@@ -362,56 +466,141 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
         💡 月次給与の入力カードは<b>収支タブ</b>へ移動しました（入力した給与はこのページの上限計算にも自動で使われます）
       </p>
 
-      <div className="card" ref={itemFormRef}>
-        <h2>{editing ? '寄付を編集' : '寄付・候補を追加'}</h2>
-        <div className="row2">
-          <label className="field">対象年（空欄=候補）
-            <input type="text" inputMode="numeric" placeholder="例: 2026" value={form.year} onChange={(e) => setForm({ ...form, year: e.target.value })} /></label>
-          <label className="field">寄付金額
-            <input type="text" inputMode="numeric" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} /></label>
-        </div>
-        <label className="field">商品名
-          <input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
-        <div className="row2">
-          <label className="field">自治体
-            <input type="text" placeholder="例: 熊本県高森町" value={form.municipality} onChange={(e) => setForm({ ...form, municipality: e.target.value })} /></label>
-          <label className="field">URL
-            <input type="url" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} /></label>
-        </div>
-        <div className="row2">
-          <label className="field">申請状況
-            <select value={form.application_status} onChange={(e) => setForm({ ...form, application_status: e.target.value })}>
-              {APPLICATION_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select></label>
-          <label className="field">申請方法
-            <input type="text" list="furusato-methods" value={form.application_method} onChange={(e) => setForm({ ...form, application_method: e.target.value })} />
-            <datalist id="furusato-methods">
-              {APPLICATION_METHODS.map((m) => <option key={m} value={m} />)}
-            </datalist></label>
-        </div>
-        <div className="row2">
-          <label className="field">商品受取
-            <select value={form.receipt_status} onChange={(e) => setForm({ ...form, receipt_status: e.target.value })}>
-              <option value="未">未</option>
-              <option value="済">済</option>
-            </select></label>
-          <label className="field">メモ
-            <input type="text" value={form.memo} onChange={(e) => setForm({ ...form, memo: e.target.value })} /></label>
-        </div>
-        <button className="btn" onClick={() => void saveItem()} disabled={saving || !form.name.trim()}>{saving ? '保存中…' : editing ? '更新' : '追加'}</button>
-        {editing && <button className="btn secondary" style={{ marginTop: 8 }} onClick={() => { setForm({ ...EMPTY_ITEM, year: String(year) }); setEditing(false) }}>キャンセル</button>}
-        {msg && <p className="pos center" style={{ margin: '8px 0 0' }}>{msg}</p>}
-      </div>
+      <button className="btn" style={{ marginBottom: 12 }} onClick={addItem}>＋ 寄付・候補を追加</button>
+      {msg && <p className="pos center" style={{ margin: '-4px 0 12px' }}>{msg}</p>}
 
       <div className="card">
-        <h2>{year}年の寄付（{yearItems.length}件）</h2>
-        <ItemList list={yearItems} />
+        <details open={searchOpen} onToggle={(e) => setSearchOpen((e.target as HTMLDetailsElement).open)}>
+          <summary style={{ fontSize: 14, color: 'var(--muted)', fontWeight: 600, cursor: 'pointer' }}>
+            🔍 検索{searching ? `（${found.length}件）` : ''}
+          </summary>
+          <label className="field" style={{ marginTop: 10 }}>商品名・自治体・メモ
+            <input type="text" placeholder="例: 牛　白糠　ティッシュ" value={filter.text} onChange={(e) => setFilter({ ...filter, text: e.target.value })} /></label>
+          <div className="row2">
+            <label className="field">申請状況
+              <select value={filter.status} onChange={(e) => setFilter({ ...filter, status: e.target.value })}>
+                <option value="">すべて</option>
+                {APPLICATION_STATUSES.map((v) => <option key={v} value={v}>{v}</option>)}
+              </select></label>
+            <label className="field">商品受取
+              <select value={filter.receipt} onChange={(e) => setFilter({ ...filter, receipt: e.target.value as ItemFilter['receipt'] })}>
+                <option value="">すべて</option>
+                <option value="未">未</option>
+                <option value="済">済</option>
+              </select></label>
+          </div>
+          <div className="row2">
+            <label className="field">対象年
+              <select value={filter.year} onChange={(e) => setFilter({ ...filter, year: e.target.value })}>
+                <option value="">すべて</option>
+                <option value="candidate">候補（年なし）</option>
+                {allYears.map((y) => <option key={y} value={String(y)}>{y}年</option>)}
+              </select></label>
+            <label className="field">寄付金額（下限〜上限）
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input type="text" inputMode="numeric" placeholder="下限" value={filter.minPrice ?? ''}
+                  onChange={(e) => setFilter({ ...filter, minPrice: num(e.target.value) })} />
+                <input type="text" inputMode="numeric" placeholder="上限" value={filter.maxPrice ?? ''}
+                  onChange={(e) => setFilter({ ...filter, maxPrice: num(e.target.value) })} />
+              </div></label>
+          </div>
+          <button className="btn small secondary" disabled={!searching} onClick={() => setFilter(EMPTY_FILTER)}>条件をクリア</button>
+          <p className="muted" style={{ fontSize: 12, margin: '8px 0 0' }}>
+            条件を入れると、<b>年をまたいで {person} さんの全件</b>から探します（下の2つのリストの代わりに検索結果を表示）。
+          </p>
+        </details>
       </div>
 
-      <div className="card">
-        <h2>候補・未購入（{candidates.length}件）</h2>
-        <ItemList list={candidates} />
-      </div>
+      {searching ? (
+        <div className="card">
+          <h2>検索結果（{found.length}件 / 全{items.length}件）</h2>
+          <ItemList list={found} showYear />
+        </div>
+      ) : (
+        <>
+          <div className="card">
+            <h2>{year}年の寄付（{yearItems.length}件）</h2>
+            <ItemList list={yearItems} />
+          </div>
+
+          <div className="card">
+            <h2>
+              候補の選び方（自動提案）
+              <HelpTip title="候補選定について">
+                候補・未購入の中から、<b>予算内で点数の合計がいちばん大きくなる組合せ</b>を選びます。
+                <br />予算 = 採用上限 − 購入済み合計 − 安全マージン。<b>合計が予算を超えることはありません</b>。
+                <br />点数の付け方はモードで変わります（下に表示）。優先度は各返礼品の編集画面で1〜5で設定します。
+                <br />還元率が未入力の返礼品は、標準還元率（設定タブの「計算の基準値」で変更可）で計算します。
+              </HelpTip>
+            </h2>
+            <div className="seg" style={{ flexWrap: 'wrap' }}>
+              {PICK_MODES.map((m) => (
+                <button key={m.value} className={pickMode === m.value ? 'on' : ''} onClick={() => setPickMode(m.value)}>{m.label}</button>
+              ))}
+            </div>
+            <p className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>
+              {PICK_MODES.find((m) => m.value === pickMode)?.note}
+            </p>
+            <label className="field">安全マージン（円・上限からこの額を残す）
+              <input type="text" inputMode="numeric" value={marginText} onChange={(e) => setMarginText(e.target.value)} /></label>
+
+            {budget === null ? (
+              <p className="muted" style={{ fontSize: 13, margin: 0 }}>
+                上限額が未設定のため予算を出せません。上のカードで年収を入れるか、上限を手動指定してください。
+              </p>
+            ) : (
+              <>
+                <div className="kv" style={{ fontSize: 13 }}>
+                  <span className="muted">予算（上限 {yen(limitAdopted ?? 0)} − 購入済み {yen(purchasedTotal)} − マージン {yen(margin)}）</span>
+                  <span className={budget < 0 ? 'neg' : 'pos'}>{yen(budget)}</span>
+                </div>
+                {pick && pick.chosen.length > 0 ? (
+                  <>
+                    <div className="kv" style={{ borderTop: '1px solid var(--border)', paddingTop: 6 }}>
+                      <span>この{pick.chosen.length}件がおすすめ</span>
+                      <span className="big" style={{ fontSize: 18 }}>{yen(pick.total)}</span>
+                    </div>
+                    <p className="muted" style={{ fontSize: 12, margin: '2px 0 6px' }}>
+                      予算の {Math.round((pick.total / Math.max(1, budget)) * 100)}% を使用・残り {yen(budget - pick.total)}
+                      {averageRate(pick.chosen) !== null && `／平均還元率 ${Math.round(averageRate(pick.chosen)! * 1000) / 10}%`}
+                    </p>
+                    <ItemList list={pick.chosen} showYear />
+                    {pick.rest.length > 0 && (
+                      <details style={{ marginTop: 8 }}>
+                        <summary className="muted" style={{ fontSize: 12, cursor: 'pointer' }}>今回は見送り（{pick.rest.length}件）</summary>
+                        <ItemList list={pick.rest} showYear />
+                      </details>
+                    )}
+                  </>
+                ) : (
+                  <p className="muted" style={{ fontSize: 13, margin: 0 }}>
+                    {candidates.length === 0
+                      ? '候補がまだありません。「＋ 寄付・候補を追加」から登録してください。'
+                      : '予算内に収まる候補がありません（マージンを減らすか、安い候補を追加してください）。'}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+
+          <div className="card">
+            <h2>候補・未購入（{candidates.length}件）</h2>
+            <ItemList list={candidates} showYear />
+          </div>
+        </>
+      )}
+
+      {modalOpen && (
+        <FurusatoItemModal
+          form={form}
+          setForm={setForm}
+          editing={editing}
+          saving={saving}
+          onSave={() => void saveItem()}
+          onClose={() => setModalOpen(false)}
+          onSearchMarket={searchMarket}
+        />
+      )}
     </>
   )
 }

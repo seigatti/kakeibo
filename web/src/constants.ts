@@ -92,6 +92,7 @@ export const CONSTANTS: ConstDef[] = [
   { key: 'dep_elderly_it', group: '税制・ふるさと納税', label: '扶養控除 老人70歳〜（所得税）', unit: '円', default: 480_000, source: SRC.nta_kojo, reviewYear: 2026, annual: false },
   { key: 'dep_elderly_rt', group: '税制・ふるさと納税', label: '扶養控除 老人70歳〜（住民税）', unit: '円', default: 380_000, source: SRC.nta_kojo, reviewYear: 2026, annual: false },
   { key: 'loan_resident_cap', group: '税制・ふるさと納税', label: '住宅ローン控除の住民税上限', unit: '円', default: 136_500, source: SRC.nta_loan, reviewYear: 2026, annual: false },
+  { key: 'furusato_std_rate', group: '税制・ふるさと納税', label: '返礼品の標準還元率（市場価格が未入力のとき）', unit: '%', default: 30, source: SRC.furusato, reviewYear: 2026, annual: false, note: '総務省ルールで返礼品の調達費は寄付額の3割以下。候補選定の点数計算で、市場価格が分からない返礼品に使う' },
 
   // ---- ライフプランの標準値（「前提の厳しさ診断」の比較基準。設定タブで変更可） ----
   { key: 'std_inflation', group: 'ライフプランの標準値', label: '標準のインフレ率', unit: '%', default: 2, source: SRC.boj, reviewYear: 2026, annual: false, note: '日銀の物価安定の目標' },

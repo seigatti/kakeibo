@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
 import HelpTip from '../components/HelpTip'
+import Modal from '../components/Modal'
 import { APPLICATION_METHODS, APPLICATION_STATUSES } from '../types'
 
 export interface ItemForm {
@@ -61,20 +61,6 @@ interface Props {
  * 一覧の上に重ねて出すので、閉じたときに元のスクロール位置がそのまま残る。
  */
 export default function FurusatoItemModal({ form, setForm, editing, saving, onSave, onClose, onSearchMarket }: Props) {
-  // Escで閉じる & 開いている間は裏をスクロールさせない
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => {
-      window.removeEventListener('keydown', onKey)
-      document.body.style.overflow = prev
-    }
-  }, [onClose])
-
   // 市場価格を入れたら還元率が、還元率を入れたら市場価格が埋まる（保存するのは市場価格だけ）
   const setMarket = (v: string) => setForm({ ...form, market_price: v, rate: rateTextOf(form.price, v) })
   const setRate = (v: string) => {
@@ -87,13 +73,7 @@ export default function FurusatoItemModal({ form, setForm, editing, saving, onSa
   const setPrice = (v: string) => setForm({ ...form, price: v, rate: rateTextOf(v, form.market_price) })
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="card modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <h2>{editing ? '寄付を編集' : '寄付・候補を追加'}</h2>
-          <button className="modal-close" onClick={onClose} aria-label="閉じる">×</button>
-        </div>
-
+    <Modal title={editing ? '寄付を編集' : '寄付・候補を追加'} onClose={onClose}>
         <div className="row2">
           <label className="field">対象年（空欄=候補）
             <input type="text" inputMode="numeric" placeholder="例: 2026" value={form.year} onChange={(e) => setForm({ ...form, year: e.target.value })} /></label>
@@ -162,7 +142,6 @@ export default function FurusatoItemModal({ form, setForm, editing, saving, onSa
 
         <button className="btn" onClick={onSave} disabled={saving || !form.name.trim()}>{saving ? '保存中…' : editing ? '更新' : '追加'}</button>
         <button className="btn secondary" style={{ marginTop: 8 }} onClick={onClose}>キャンセル</button>
-      </div>
-    </div>
+    </Modal>
   )
 }

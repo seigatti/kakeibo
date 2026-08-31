@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Chart, Line } from 'react-chartjs-2'
 import HelpTip from '../components/HelpTip'
+import Collapsible from '../components/Collapsible'
 import { getConst } from '../constants'
 import {
   DEFAULT_LIFEPLAN,
@@ -207,6 +208,13 @@ export default function Lifeplan() {
   const resultA = useMemo(() => (planA ? simScenario(planA) : result), [planA, simScenario, result])
   const resultB = useMemo(() => (planB ? simScenario(planB) : null), [planB, simScenario])
 
+  // 編集画面へ切り替える。シナリオ0件のときの早期returnからも呼ぶので、それより前で定義する
+  const startEdit = (draft: LifeplanConfig, originalName: string | null) => {
+    setEdit({ draft, originalName })
+    setSurvey(false)
+    setMsg('')
+  }
+
   // シナリオがまだ無いときは作成を促す（アンケート画面・編集画面はこの前で分岐する）
   if (!cfg || !result) {
     if (!data) return <p className="muted center">読み込み中…</p>
@@ -337,11 +345,6 @@ export default function Lifeplan() {
   )
 
   // ---- 編集・アンケート画面 ----
-  const startEdit = (draft: LifeplanConfig, originalName: string | null) => {
-    setEdit({ draft, originalName })
-    setSurvey(false)
-    setMsg('')
-  }
   const cancelEdit = () => {
     setEdit(null)
     setMsg('編集をキャンセルしました')
@@ -574,8 +577,8 @@ export default function Lifeplan() {
           <span className={rA.depletionYear !== null ? 'neg' : 'pos'}>{rA.depletionYear ?? 'なし'}</span></div>
       </div>
 
-      <details className="graph-section">
-        <summary>🔍 前提の厳しさ診断: {nameA}</summary>
+      <Collapsible variant="section" title={`🔍 前提の厳しさ診断: ${nameA}`}
+        hint={diagnosis && diagnosis.factors.length > 0 ? `厳しい前提 ${diagnosis.factors.length}件` : undefined}>
 
         <div className="card">
         <h2>
@@ -636,7 +639,7 @@ export default function Lifeplan() {
           </>
         )}
       </div>
-      </details>
+      </Collapsible>
 
       {/* グラフの表示範囲。カードは貼り付かせず普通に流し、上に消えきったら
           入力欄だけの細いバー（.range-fixed）を画面上部に固定表示する */}

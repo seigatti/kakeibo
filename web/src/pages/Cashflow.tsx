@@ -3,6 +3,7 @@ import { Chart, Line } from 'react-chartjs-2'
 import { useStore } from '../store'
 import { CONSUMPTION_UNITS, DEFAULT_CATEGORIES } from '../types'
 import HelpTip from '../components/HelpTip'
+import Collapsible from '../components/Collapsible'
 import PeriodPicker, { usePeriod } from '../components/PeriodPicker'
 import { DEFAULT_PERSONS } from '../types'
 import { addMonths, categoryStats, dataMonthRange, DEFAULT_PRINCIPAL_CAP, effectiveIncomeByMonth, estimateOtherExpense, expenseByMonth, fixedMonthlyTotal, monthRange, netSalaryByMonth, nonInvestBreakdownByMonth, otherIncomeByMonth, thisMonth, yen, yenShort } from '../utils'
@@ -229,8 +230,7 @@ export default function Cashflow() {
               算出には前月末と当月末の資産記録（投資・現金）と評価損益が必要です。
               給料が未入力の月は給与データの手取りを収入として表示します（手入力が優先）
             </p>
-            <details style={{ marginTop: 8 }}>
-              <summary className="muted" style={{ fontSize: 13, cursor: 'pointer' }}>その他支出の内訳（診断用）</summary>
+            <Collapsible title="その他支出の内訳（診断用）" hint={`${chartMonths.length}ヶ月`}>
               <div style={{ overflowX: 'auto', marginTop: 6 }}>
                 <table style={{ fontSize: 11, borderCollapse: 'collapse', whiteSpace: 'nowrap', width: '100%' }}>
                   <thead>
@@ -291,7 +291,7 @@ export default function Cashflow() {
               <p className="muted" style={{ fontSize: 11, margin: '4px 0 0' }}>
                 売却方向（マイナス）だけを判定するので、積立額の大小には影響されません。頻繁に売却する運用なら小さめに、しない運用なら大きめでOKです
               </p>
-            </details>
+            </Collapsible>
           </div>
 
           <div className="card">

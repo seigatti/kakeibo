@@ -149,5 +149,13 @@ export const getConstDef = (key: string) => DEFS[key]
 export const isOverridden = (key: string) => key in overrides
 export const currentOverrides = () => ({ ...overrides })
 
-export const CONST_GROUPS: ConstGroup[] = ['年金（想定）', '子供費用', '児童手当', 'マイホーム', '税制・ふるさと納税']
+export const CONST_GROUPS: ConstGroup[] = [
+  '年金（想定）',
+  '子供費用',
+  '児童手当',
+  'マイホーム',
+  '税制・ふるさと納税',
+  'ライフプランの標準値',
+  '年齢別の平均（比較用）',
+]
 export const constantsOf = (group: ConstGroup) => CONSTANTS.filter((c) => c.group === group)

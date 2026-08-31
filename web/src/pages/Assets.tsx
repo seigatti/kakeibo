@@ -1,13 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Bar, Line } from 'react-chartjs-2'
 import HelpTip from '../components/HelpTip'
+import Modal from '../components/Modal'
 import LoanTotalsCard from '../components/LoanTotalsCard'
 import PeriodPicker, { inRange, usePeriod } from '../components/PeriodPicker'
 import { useStore } from '../store'
+import type { AssetRow } from '../types'
 import { assetTotal, sortedAssets, thisMonth, today, yen, yenShort } from '../utils'
 import LiabilityCard from './LiabilityCard'
 
 const PREFILL_KEYS = ['investment', 'cash', 'pension', 'profit', 'gain'] as const
+
+const HIST_LIMIT_KEY = 'kakeibo.assetHistoryLimit'
+/** 記録履歴の表示件数。0 = 全件 */
+const HIST_LIMITS: Array<[number, string]> = [[10, '10件'], [30, '30件'], [100, '100件'], [0, '全件']]
 
 // 全期間表示でも横軸ラベルが潰れないように間引く
 const xTicks = { ticks: { maxTicksLimit: 12, maxRotation: 0 } }
@@ -22,6 +28,10 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
   const [gain, setGain] = useState('')
   const [memo, setMemo] = useState('')
   const [msg, setMsg] = useState('')
+  // 記録履歴の表示件数（0=全件）。選択は端末に覚えさせる
+  const [histLimit, setHistLimit] = useState(() => Number(localStorage.getItem(HIST_LIMIT_KEY) ?? '10'))
+  // 日付変更の対象（モーダル）
+  const [dateEdit, setDateEdit] = useState<{ row: AssetRow; to: string } | null>(null)
   const appliedPrefill = useRef<string | null>(null)
 
   const assets = useMemo(() => sortedAssets(data?.assets ?? []), [data])
@@ -103,6 +113,28 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
     if (!window.confirm(`${d} の記録を削除しますか？`)) return
     await mutate('deleteAsset', { date: d })
   }
+
+  /**
+   * 記録の日付を変える。
+   * @param move true なら移動（元を削除）、false ならコピー（元を残す）
+   * 先に新しい日付へ作ってから元を消すので、途中で失敗しても記録が消えることはない。
+   */
+  const changeDate = async (row: AssetRow, to: string, move: boolean) => {
+    if (!to || to === row.date) return
+    const clash = assets.find((a) => a.date === to)
+    if (clash && !window.confirm(`${to} には既に記録があります。上書きしますか？`)) return
+    setMsg('')
+    await mutate('upsertAsset', { row: { ...row, date: to } })
+    if (move) await mutate('deleteAsset', { date: row.date })
+    setDateEdit(null)
+    setMsg(move ? `${row.date} を ${to} へ移動しました ✓` : `${row.date} を ${to} にコピーしました ✓`)
+  }
+
+  // 記録履歴（新しい順）。0 は全件（グローバルの history と紛れないよう histRows）
+  const histRows = useMemo(() => {
+    const desc = [...assets].reverse()
+    return histLimit > 0 ? desc.slice(0, histLimit) : desc
+  }, [assets, histLimit])
 
   const lineOpts = {
     maintainAspectRatio: false,
@@ -221,17 +253,52 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
 
       {assets.length > 0 && (
         <div className="card">
-          <h2>記録履歴（新しい順）</h2>
+          <h2>記録履歴（新しい順）{histRows.length}件 / 全{assets.length}件</h2>
+          <div className="seg">
+            {HIST_LIMITS.map(([v, label]) => (
+              <button key={v} className={histLimit === v ? 'on' : ''}
+                onClick={() => { setHistLimit(v); localStorage.setItem(HIST_LIMIT_KEY, String(v)) }}>{label}</button>
+            ))}
+          </div>
           <ul className="list">
-            {[...assets].reverse().slice(0, 50).map((a) => (
+            {histRows.map((a) => (
               <li key={a.date}>
                 <span className="muted" style={{ cursor: 'pointer' }} onClick={() => applyRow(a.date)}>{a.date}</span>
                 <span>{yen(assetTotal(a))}</span>
+                <button className="btn small secondary" onClick={() => setDateEdit({ row: a, to: a.date })}>日付</button>
                 <button className="btn danger small" onClick={() => void remove(a.date)}>削除</button>
               </li>
             ))}
           </ul>
+          <p className="muted" style={{ fontSize: 12, margin: '8px 0 0' }}>
+            日付をタップすると上の入力欄に読み込みます。「日付」から日付だけを変えた移動・コピーができます。
+          </p>
         </div>
+      )}
+
+      {dateEdit && (
+        <Modal title="日付を変更" onClose={() => setDateEdit(null)}>
+          <div className="kv">
+            <span className="muted">元の日付</span>
+            <span>{dateEdit.row.date}（{yen(assetTotal(dateEdit.row))}）</span>
+          </div>
+          <label className="field" style={{ marginTop: 10 }}>新しい日付
+            <input type="date" value={dateEdit.to} onChange={(e) => setDateEdit({ ...dateEdit, to: e.target.value })} /></label>
+          {dateEdit.to !== dateEdit.row.date && assets.some((a) => a.date === dateEdit.to) && (
+            <p className="neg" style={{ fontSize: 12, margin: '0 0 10px' }}>
+              ⚠ {dateEdit.to} には既に記録があります。実行すると上書きされます
+            </p>
+          )}
+          <div className="row2">
+            <button className="btn secondary" style={{ marginTop: 0 }} disabled={saving || dateEdit.to === dateEdit.row.date}
+              onClick={() => void changeDate(dateEdit.row, dateEdit.to, false)}>コピー（元を残す）</button>
+            <button className="btn" style={{ marginTop: 0 }} disabled={saving || dateEdit.to === dateEdit.row.date}
+              onClick={() => void changeDate(dateEdit.row, dateEdit.to, true)}>移動（元を削除）</button>
+          </div>
+          <p className="muted" style={{ fontSize: 12, margin: '10px 0 0' }}>
+            投資・現金・年金・評価損益・メモはそのまま引き継ぎます。
+          </p>
+        </Modal>
       )}
     </>
   )

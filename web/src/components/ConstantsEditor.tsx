@@ -6,6 +6,7 @@ import {
   type ConstDef,
 } from '../constants'
 import HelpTip from './HelpTip'
+import Collapsible from './Collapsible'
 import { useStore } from '../store'
 
 /**
@@ -92,12 +93,12 @@ export default function ConstantsEditor() {
         const changedInGroup = items.filter(isChanged).length
         const needsReview = items.filter((c) => c.annual && thisYear > c.reviewYear).length
         return (
-          <details key={g} style={{ borderTop: '1px solid var(--border)', padding: '6px 0' }}>
-            <summary style={{ cursor: 'pointer', fontSize: 14 }}>
+          <Collapsible key={g} hint={`${items.length}項目`}
+            title={<>
               {g}
               {changedInGroup > 0 && <span style={{ color: 'var(--accent)', fontSize: 11 }}>（{changedInGroup}件変更）</span>}
               {needsReview > 0 && <span style={{ color: 'var(--amber)', fontSize: 11 }}> ⚠要確認{needsReview}</span>}
-            </summary>
+            </>}>
             <div style={{ marginTop: 8 }}>
               {items.map((c) => {
                 const review = c.annual && thisYear > c.reviewYear
@@ -137,7 +138,7 @@ export default function ConstantsEditor() {
                 )
               })}
             </div>
-          </details>
+          </Collapsible>
         )
       })}
 

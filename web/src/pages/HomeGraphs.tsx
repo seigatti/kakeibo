@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { Bar, Chart, Doughnut, Line } from 'react-chartjs-2'
+import Collapsible from '../components/Collapsible'
 import HelpTip from '../components/HelpTip'
 import LoanTotalsCard from '../components/LoanTotalsCard'
 import PeriodPicker, { inRange, usePeriod } from '../components/PeriodPicker'
@@ -265,8 +266,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
       <PeriodPicker period={period} note="ホームの全グラフ共通" />
 
       {/* ===================== 資産 ===================== */}
-      <details open className="graph-section">
-        <summary>📈 資産のグラフ</summary>
+      <Collapsible variant="section" defaultOpen title="📈 資産のグラフ">
 
         {assetRecent.length >= 2 && (
           <div className="card">
@@ -362,11 +362,10 @@ export default function HomeGraphs({ data }: { data: AllData }) {
             </div>
           </div>
         )}
-      </details>
+      </Collapsible>
 
       {/* ===================== 収支 ===================== */}
-      <details open className="graph-section">
-        <summary>💰 収支のグラフ</summary>
+      <Collapsible variant="section" defaultOpen title="💰 収支のグラフ">
 
         <div className="card">
           <h2>
@@ -550,12 +549,11 @@ export default function HomeGraphs({ data }: { data: AllData }) {
           </div>
           </>
         )}
-      </details>
+      </Collapsible>
 
       {/* ===================== 消費量 ===================== */}
       {consumptionCats.length > 0 && (
-        <details open className="graph-section">
-          <summary>⚡ 消費量のグラフ</summary>
+        <Collapsible variant="section" defaultOpen title="⚡ 消費量のグラフ">
 
           <div className="card">
             <h2>消費量の推移</h2>
@@ -588,7 +586,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
               />
             </div>
           </div>
-        </details>
+        </Collapsible>
       )}
     </>
   )

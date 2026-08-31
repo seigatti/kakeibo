@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import HelpTip from '../components/HelpTip'
+import Collapsible from '../components/Collapsible'
 import { useStore } from '../store'
 import type { FurusatoProfile } from '../types'
 import { dependentDeduction, yen } from '../utils'
@@ -51,10 +52,7 @@ export default function ProfileCard({ persons, year, profile }: { persons: strin
 
   return (
     <div className="card">
-      <details>
-        <summary style={{ cursor: 'pointer', fontSize: 14, fontWeight: 600, color: 'var(--muted)' }}>
-          控除プロフィール（世帯で1つ：家族構成・住宅ローン）
-        </summary>
+      <Collapsible title="控除プロフィール（世帯で1つ：家族構成・住宅ローン）">
         <p className="muted" style={{ fontSize: 12 }}>
           頻繁に変わらない設定です。配偶者・扶養・住宅ローン控除は<b>世帯主の上限計算にのみ</b>反映されます。
           <HelpTip title="各控除の計算">
@@ -95,7 +93,7 @@ export default function ProfileCard({ persons, year, profile }: { persons: strin
         )}
         <button className="btn" onClick={() => void save()} disabled={saving}>{saving ? '保存中…' : 'プロフィールを保存'}</button>
         {msg && <p className="pos center" style={{ margin: '8px 0 0' }}>{msg}</p>}
-      </details>
+      </Collapsible>
     </div>
   )
 }

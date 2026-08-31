@@ -16,6 +16,7 @@ import {
   type ItemFilter,
   type PickMode,
 } from '../furusato'
+import Collapsible from '../components/Collapsible'
 import HelpTip from '../components/HelpTip'
 import ProfileCard from './ProfileCard'
 import FurusatoItemModal, { EMPTY_ITEM, rateTextOf, type ItemForm } from './FurusatoItemModal'
@@ -359,8 +360,8 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
           <span>追加可能額</span>
           <span className={remaining !== null && remaining < 0 ? 'neg' : 'pos'}>{remaining !== null ? yen(remaining) : '−'}</span>
         </div>
-        <details style={{ marginTop: 8 }} open={limitOpen} onToggle={(e) => setLimitOpen((e.target as HTMLDetailsElement).open)}>
-          <summary className="muted" style={{ fontSize: 13, cursor: 'pointer' }}>上限の計算・入力（年収・社会保険料など）</summary>
+        <Collapsible title="上限の計算・入力（年収・社会保険料など）" defaultOpen={limitOpen} onToggle={setLimitOpen}
+          hint={limitAdopted !== null ? `採用上限 ${yen(limitAdopted)}` : '未設定'}>
           <div className="row2" style={{ marginTop: 8 }}>
             <label className="field">
               年収（額面・空欄なら想定を採用）
@@ -418,8 +419,7 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
             ※配偶者特別控除・調整控除などは省略した目安です。税額通知書などで正確な値が分かったら「手動指定」に入れてください。
           </p>
           {detailed && (
-            <details style={{ marginBottom: 10 }}>
-              <summary className="muted" style={{ fontSize: 12, cursor: 'pointer' }}>計算の内訳を表示</summary>
+            <Collapsible title="計算の内訳を表示">
               <div style={{ fontSize: 12, marginTop: 6 }}>
                 <div className="kv"><span className="muted">給与所得（収入−給与所得控除）</span><span>{yen(detailed.breakdown.shotoku)}</span></div>
                 <div className="kv"><span className="muted">社会保険料控除</span><span>{yen(detailed.breakdown.social)}</span></div>
@@ -454,10 +454,10 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
                   <div className="kv"><span className="muted">住宅ローン控除（住民税側）</span><span className="neg">−{yen(detailed.breakdown.loanResident)}</span></div>
                 )}
               </div>
-            </details>
+            </Collapsible>
           )}
           <button className="btn" onClick={() => void saveYear()} disabled={saving}>{saving ? '保存中…' : '上限情報を保存'}</button>
-        </details>
+        </Collapsible>
       </div>
 
       <ProfileCard persons={persons} year={year} profile={profile} />
@@ -470,10 +470,8 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
       {msg && <p className="pos center" style={{ margin: '-4px 0 12px' }}>{msg}</p>}
 
       <div className="card">
-        <details open={searchOpen} onToggle={(e) => setSearchOpen((e.target as HTMLDetailsElement).open)}>
-          <summary style={{ fontSize: 14, color: 'var(--muted)', fontWeight: 600, cursor: 'pointer' }}>
-            🔍 検索{searching ? `（${found.length}件）` : ''}
-          </summary>
+        <Collapsible title="🔍 検索" defaultOpen={searchOpen} onToggle={setSearchOpen}
+          hint={searching ? `${found.length}件 / 全${items.length}件` : '未指定'}>
           <label className="field" style={{ marginTop: 10 }}>商品名・自治体・メモ
             <input type="text" placeholder="例: 牛　白糠　ティッシュ" value={filter.text} onChange={(e) => setFilter({ ...filter, text: e.target.value })} /></label>
           <div className="row2">
@@ -508,7 +506,7 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
           <p className="muted" style={{ fontSize: 12, margin: '8px 0 0' }}>
             条件を入れると、<b>年をまたいで {person} さんの全件</b>から探します（下の2つのリストの代わりに検索結果を表示）。
           </p>
-        </details>
+        </Collapsible>
       </div>
 
       {searching ? (
@@ -566,10 +564,9 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
                     </p>
                     <ItemList list={pick.chosen} showYear />
                     {pick.rest.length > 0 && (
-                      <details style={{ marginTop: 8 }}>
-                        <summary className="muted" style={{ fontSize: 12, cursor: 'pointer' }}>今回は見送り（{pick.rest.length}件）</summary>
+                      <Collapsible title="今回は見送り" hint={`${pick.rest.length}件`}>
                         <ItemList list={pick.rest} showYear />
-                      </details>
+                      </Collapsible>
                     )}
                   </>
                 ) : (

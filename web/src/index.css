@@ -424,33 +424,95 @@ button {
   gap: 6px;
 }
 
-/* ホームのグラフ折りたたみセクション */
-.graph-section > summary {
+/* ---- 共通の折りたたみ（.collapse） ----
+   素の <details> は「押せる」ことに気づきにくいので、枠線・背景・回転するシェブロンで
+   ボタンらしく見せる。閉じているときだけ中身の要約(.collapse-hint)を右端に出す。 */
+.collapse > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   cursor: pointer;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.collapse > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* 左のシェブロン。開くと90度回る */
+.collapse > summary::before {
+  content: '▶';
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--accent);
+  transition: transform 0.15s ease;
+}
+
+.collapse[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.collapse > summary:hover {
+  background: var(--bg3);
+  border-color: var(--accent);
+}
+
+/* 開いている間は左のアクセント線を濃くして、どれを開いているか分かるようにする */
+.collapse[open] > summary {
+  border-left-color: var(--accent);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.collapse-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.collapse-hint {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+/* 開いたら要約は不要（中身が見えているため） */
+.collapse[open] .collapse-hint {
+  display: none;
+}
+
+/* ページ直下の大きい見出し（ホームのグラフなど） */
+.collapse.section > summary {
   font-size: 15px;
   font-weight: 700;
   padding: 12px 14px;
   margin-bottom: 12px;
   background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  list-style: none;
 }
 
-.graph-section > summary::-webkit-details-marker {
-  display: none;
+.collapse.section[open] > summary {
+  margin-bottom: 8px;
 }
 
-.graph-section > summary::after {
-  content: ' ▼';
-  float: right;
+/* カード内の小さい折りたたみ */
+.collapse.inline > summary {
+  font-size: 13px;
+  font-weight: 600;
   color: var(--muted);
-  font-size: 12px;
+  padding: 8px 10px;
 }
 
-.graph-section[open] > summary::after {
-  content: ' ▲';
+.collapse.inline > summary + * {
+  margin-top: 8px;
 }
+
 
 /* ---- ヘルプ「？」 ---- */
 .helptip {

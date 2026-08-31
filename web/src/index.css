@@ -646,3 +646,53 @@ code.wrap {
   line-height: 1.5;
   white-space: nowrap;
 }
+
+/* ---- 内訳タイル（.kv の縦積みだと縦に長くなる内訳を、横に並べてコンパクトにする） ---- */
+.stat-grid {
+  display: grid;
+  /* スマホ幅で2列・640pxで4列。金額が折り返さない幅を確保する */
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  column-gap: 14px;
+  row-gap: 2px;
+  margin-top: 8px;
+}
+
+/* 枠線・内側余白を持たせると金額が折り返してしまうので、下線だけの軽い行にする */
+.stat {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 2px 0;
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+}
+
+.stat .k {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.stat .v {
+  flex: 1 1 auto;
+  text-align: right;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  min-width: 0;
+}
+
+.stat .d {
+  /* 金額のすぐ後ろに続ける（入りきらない幅のときだけ折り返す） */
+  font-size: 9.5px;
+  font-weight: 400;
+  margin-left: 3px;
+  white-space: nowrap;
+}
+
+/* 金額そのものは途中で折り返さない */
+.stat .v > .num {
+  white-space: nowrap;
+}

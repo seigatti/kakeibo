@@ -25,12 +25,13 @@ export default function LoanTotalsCard({ liabilities }: { liabilities: Liability
         <HelpTip title="総支払額の計算">
           当初借入額・金利・返済年数から、元利均等・固定金利で完済までに支払う総額を試算します。
           {'\n'}総支払額 = 毎月返済額 × 返済回数（年数×12）、利息総額 = 総支払額 − 当初借入額。
-          {'\n'}※当初の借入条件どおりに返した場合の金額です。繰上返済（現在残高の実測）や金利変動は反映していません。
+          {'\n'}各項目: 当初借入=借りた元金、利息=完済までに上乗せで払う利息の総額（「元金の+○%」は元金に対する割合）、毎月返済=毎月の返済額、支払済/残り=これまでに払った額とこれから払う額（カッコ内は返済回数）。
+          ※当初の借入条件どおりに返した場合の金額です。繰上返済（現在残高の実測）や金利変動は反映していません。
         </HelpTip>
       </h2>
 
       {rows.map(({ l, t }) => (
-        <div key={l.id} style={{ marginBottom: 10 }}>
+        <div key={l.id} style={{ marginBottom: 12 }}>
           <div className="kv">
             <span>
               {l.name}
@@ -38,22 +39,35 @@ export default function LoanTotalsCard({ liabilities }: { liabilities: Liability
             </span>
             <b>{yen(t.total)}</b>
           </div>
-          <div className="kv" style={{ paddingLeft: 12 }}>
-            <span className="muted">　当初借入額</span><span>{yen(t.principal)}</span>
-          </div>
-          <div className="kv" style={{ paddingLeft: 12 }}>
-            <span className="muted">　利息総額（+{Math.round((t.interest / t.principal) * 1000) / 10}%）</span>
-            <span className="neg">+{yen(t.interest)}</span>
-          </div>
-          <div className="kv" style={{ paddingLeft: 12 }}>
-            <span className="muted">　毎月返済額</span><span>{yen(t.monthly)}</span>
-          </div>
-          {t.endMonth && (
-            <div className="kv" style={{ paddingLeft: 12 }}>
-              <span className="muted">　支払済 / 残り（{t.paidMonths}/{t.months}回）</span>
-              <span>{yen(t.paid)} / {yen(t.remaining)}</span>
+          <div className="stat-grid" style={{ marginTop: 6 }}>
+            <div className="stat">
+              <span className="k">当初借入</span>
+              <span className="v">{yen(t.principal)}</span>
             </div>
-          )}
+            <div className="stat">
+              <span className="k">利息</span>
+              <span className="v">
+                <span className="neg">+{yen(t.interest)}</span>
+                <span className="d neg">元金の+{Math.round((t.interest / t.principal) * 1000) / 10}%</span>
+              </span>
+            </div>
+            <div className="stat">
+              <span className="k">毎月返済</span>
+              <span className="v">{yen(t.monthly)}</span>
+            </div>
+            {t.endMonth && (
+              <>
+                <div className="stat">
+                  <span className="k">支払済</span>
+                  <span className="v">{yen(t.paid)}<span className="d">{t.paidMonths}/{t.months}回</span></span>
+                </div>
+                <div className="stat">
+                  <span className="k">残り</span>
+                  <span className="v">{yen(t.remaining)}<span className="d">あと{t.months - t.paidMonths}回</span></span>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       ))}
 

@@ -41,8 +41,11 @@ export const yenShort = (v: number) =>
       ? `${(v / 10000).toLocaleString('ja-JP', { maximumFractionDigits: 0 })}万`
       : `${v.toLocaleString('ja-JP')}`
 
-/** プレースホルダ等に金額を直接埋めるときに使う（マスク対応の toLocaleString） */
-export const amt = (v: number) => (masked ? '＊＊＊' : v.toLocaleString('ja-JP'))
+/**
+ * プレースホルダ等に金額を直接埋めるときに使う（マスク対応の toLocaleString）。
+ * yen() と同じく円未満は丸める（負債残高など小数が出る値をそのまま出さないため）。
+ */
+export const amt = (v: number) => (masked ? '＊＊＊' : Math.round(v).toLocaleString('ja-JP'))
 
 export const thisMonth = () => new Date().toISOString().slice(0, 7)
 export const today = () => new Date().toISOString().slice(0, 10)

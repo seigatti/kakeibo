@@ -8,6 +8,7 @@ import { CONSUMPTION_UNITS, type AllData } from '../types'
 import {
   assetAllocationTrend,
   assetItemDiffs,
+  amt,
   assetTotal,
   categoryStats,
   DEFAULT_PRINCIPAL_CAP,
@@ -172,6 +173,12 @@ export default function HomeGraphs({ data }: { data: AllData }) {
   // 現時点の負債合計（純資産の推移を出すかの判定に使う。期間ピッカーの影響を受けない）
   const liabilityTotal = totalLiabilitiesAt(liabilities, month)
 
+  // 総資産 = 資産 − 負債。負債残高は記録の月時点で見るので、前回比も同じ土俵で比べられる
+  const liabNow = latest ? totalLiabilitiesAt(liabilities, latest.date.slice(0, 7), month) : 0
+  const liabPrev = prev ? totalLiabilitiesAt(liabilities, prev.date.slice(0, 7), month) : 0
+  const netNow = latest ? assetTotal(latest) - liabNow : 0
+  const netPrev = prev ? assetTotal(prev) - liabPrev : 0
+
   // 期間集計（period に追従）
   const sum = useMemo(() => periodSummary(data, period.from, period.to, principalCap), [data, period.from, period.to, principalCap])
   const cumulative = useMemo(() => {
@@ -196,44 +203,65 @@ export default function HomeGraphs({ data }: { data: AllData }) {
       <div className="card">
         <h2>
           総資産{latest ? `（${latest.date}時点）` : ''}
-          <HelpTip title="前回比について">
-            合計の「前回比」は1つ前の記録との差です。
-            <br />投資・現金・年金それぞれの増減は、<b>その項目が記録されている直近の記録</b>との差で出しています。
-            <br />（現金だけ・投資だけを記録した日があっても増減がズレないようにするため）
+          <HelpTip title="総資産と前回比について">
+            <b>総資産 = 投資＋現金＋年金 − 負債残高</b>（借入を返し終えたあとに手元に残る額）。
+            <br />負債残高はローンの返済スケジュールから出したその月の残高です（資産タブで実測値を入れていればそちらを優先）。
+            <br />「前回比」は1つ前の記録との差で、負債の減りぶんも含めた総資産どうしの比較です。
+            <br />投資・現金・年金それぞれの増減は、<b>その項目が記録されている直近の記録</b>との差で出しています
+            （現金だけ・投資だけを記録した日があっても増減がズレないようにするため）。
+            <br />投資はマネーフォワード、現金はZaimの残高を想定しています。
           </HelpTip>
         </h2>
         {latest ? (
           <>
-            <div className="big">{yen(assetTotal(latest))}</div>
+            <div className={netNow < 0 ? 'big neg' : 'big'}>{yen(netNow)}</div>
             {prev && (
-              <div className={assetTotal(latest) - assetTotal(prev) >= 0 ? 'pos' : 'neg'}>
-                前回比 {assetTotal(latest) - assetTotal(prev) >= 0 ? '+' : ''}
-                {yen(assetTotal(latest) - assetTotal(prev))}
+              <div className={netNow - netPrev >= 0 ? 'pos' : 'neg'}>
+                前回比 {netNow - netPrev >= 0 ? '+' : ''}{yen(netNow - netPrev)}
               </div>
             )}
-            <div style={{ marginTop: 8 }}>
-              {([['投資（マネフォ）', latest.investment, itemDiffs.investment],
-                 ['現金（Zaim）', latest.cash, itemDiffs.cash],
+            <div className="stat-grid">
+              {([['投資', latest.investment, itemDiffs.investment],
+                 ['現金', latest.cash, itemDiffs.cash],
                  ['年金', latest.pension, itemDiffs.pension]] as [string, number | null, number | null][]).map(([label, value, d]) => (
-                <div className="kv" key={label}>
-                  <span className="muted">{label}</span>
-                  <span>
-                    {yen(value)}
+                <div className="stat" key={label}>
+                  <span className="k">{label}</span>
+                  <span className="v">
+                    <span className="num">{yen(value)}</span>
                     {d !== null && (
-                      <span className={d >= 0 ? 'pos' : 'neg'} style={{ fontSize: 11, marginLeft: 6 }}>
-                        {d >= 0 ? '+' : ''}{yen(d)}
-                      </span>
+                      <span className={`d ${d >= 0 ? 'pos' : 'neg'}`}>{d >= 0 ? '+' : ''}{amt(d)}</span>
                     )}
                   </span>
                 </div>
               ))}
-              {latest.mf_profit !== null && (
-                <div className="kv"><span className="muted">評価損益（累計）</span>
-                  <span className={latest.mf_profit >= 0 ? 'pos' : 'neg'}>{yen(latest.mf_profit)}</span></div>
+              <div className="stat">
+                <span className="k">資産計</span>
+                <span className="v">{yen(assetTotal(latest))}</span>
+              </div>
+              <div className="stat">
+                <span className="k">負債</span>
+                <span className="v">
+                  <span className="num neg">{liabNow > 0 ? '−' : ''}{yen(liabNow)}</span>
+                  {prev && liabNow - liabPrev !== 0 && (
+                    <span className={`d ${liabNow - liabPrev <= 0 ? 'pos' : 'neg'}`}>
+                      {liabNow - liabPrev >= 0 ? '+' : ''}{amt(liabNow - liabPrev)}
+                    </span>
+                  )}
+                </span>
+              </div>
+              {typeof latest.mf_profit === 'number' && (
+                <div className="stat">
+                  <span className="k">評価損益</span>
+                  <span className={`v ${latest.mf_profit >= 0 ? 'pos' : 'neg'}`}>{yen(latest.mf_profit)}</span>
+                </div>
               )}
-              {latest.monthly_gain !== null && (
-                <div className="kv"><span className="muted">今月の投資増減</span>
-                  <span className={latest.monthly_gain >= 0 ? 'pos' : 'neg'}>{latest.monthly_gain >= 0 ? '+' : ''}{yen(latest.monthly_gain)}</span></div>
+              {typeof latest.monthly_gain === 'number' && (
+                <div className="stat">
+                  <span className="k">今月の投資増減</span>
+                  <span className={`v ${latest.monthly_gain >= 0 ? 'pos' : 'neg'}`}>
+                    {latest.monthly_gain >= 0 ? '+' : ''}{yen(latest.monthly_gain)}
+                  </span>
+                </div>
               )}
             </div>
           </>

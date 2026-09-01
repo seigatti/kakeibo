@@ -10,11 +10,16 @@ const PRESETS: [Preset, string][] = [
   ['custom', '期間指定'],
 ]
 
-/** プリセット→[開始月, 終了月]。custom は両方入力済みのときのみ採用、既定（all）は最古〜当月 */
+/**
+ * プリセット→[開始月, 終了月]。既定（all）は最古〜当月。
+ * custom は「両方入力済みのときだけ採用」だと、片方だけ変えても効かず
+ * 期間指定が反応しないように見えるため、未入力の側は既定値（最古 / 当月）で補う。
+ * 終了月は未来でもよい（データが無くてもグラフの横軸は伸びる。負債の返済推移を見るため）。
+ */
 export function rangeOf(preset: Preset, month: string, earliest: string, cf: string, ct: string): [string, string] {
   if (preset === 'year') return [`${month.slice(0, 4)}-01`, month]
   if (preset === '12m') return [addMonths(month, -11), month]
-  if (preset === 'custom' && cf && ct) return [cf, ct]
+  if (preset === 'custom') return [cf || earliest, ct || month]
   return [earliest, month]
 }
 
@@ -70,6 +75,7 @@ export default function PeriodPicker({ period, note }: { period: Period; note?: 
       <p className="muted" style={{ fontSize: 12, margin: 0 }}>
         表示期間: {from} 〜 {to}
         {note ? `（${note}）` : ''}
+        {preset === 'custom' && to > thisMonth() && <><br />※終了月が未来なので、負債の返済予定は先まで表示されます（実績が無い資産・収支は途切れます）</>}
       </p>
     </div>
   )

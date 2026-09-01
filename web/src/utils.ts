@@ -208,12 +208,35 @@ export function loanTotals(l: LiabilityRow, currentMonth: string = thisMonth()):
 
 export interface NetWorthPoint {
   month: string
-  assets: number
+  /** 実績が無い月（未来など）は null */
+  assets: number | null
   liabilities: number
-  netWorth: number
+  /** 実績が無い月（未来など）は null */
+  netWorth: number | null
 }
 
 /** 資産スナップショットのある月ごとの純資産（資産 − 負債） */
+/**
+ * 指定した月の並びに沿って純資産を出す。
+ * 負債は返済予定から計算できるので**未来の月でも値が出る**（負債の返済推移を見るため）。
+ * 資産の実績が無い月は null にして、グラフ側は spanGaps で実績のある区間だけ線を引く。
+ */
+export function netWorthOver(
+  months: string[],
+  assets: AssetRow[],
+  liabilities: LiabilityRow[],
+  currentMonth: string = thisMonth(),
+): NetWorthPoint[] {
+  const snap = assetSnapshotByMonthEnd(assets)
+  return months.map((month) => {
+    // 返済スケジュールから出る残高は小数が出るので、表示・ツールチップ用に円未満は丸める
+    const liab = Math.round(totalLiabilitiesAt(liabilities, month, currentMonth))
+    const s = snap.get(month)
+    const a = s ? s.total : null
+    return { month, assets: a, liabilities: liab, netWorth: a === null ? null : Math.round(a - liab) }
+  })
+}
+
 export function netWorthByMonth(assets: AssetRow[], liabilities: LiabilityRow[], currentMonth: string = thisMonth()): NetWorthPoint[] {
   const snap = assetSnapshotByMonthEnd(assets)
   return [...snap.entries()]

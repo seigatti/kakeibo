@@ -21,7 +21,7 @@ import {
   fixedMonthlyTotal,
   monthRange,
   netSalaryByMonth,
-  netWorthByMonth,
+  netWorthOver,
   nonInvestBreakdownByMonth,
   otherIncomeByMonth,
   periodSummary,
@@ -102,10 +102,6 @@ export default function HomeGraphs({ data }: { data: AllData }) {
     () => assetAllocationTrend(data.assets).filter((p) => inRange(p.month, period.from, period.to)),
     [data, period.from, period.to],
   )
-  const netWorthSeries = useMemo(
-    () => netWorthByMonth(data.assets, liabilities).filter((p) => inRange(p.month, period.from, period.to)),
-    [data, liabilities, period.from, period.to],
-  )
   const profits = assetRecent.filter((a) => a.mf_profit !== null)
   const gains = useMemo(() => {
     const byMonth = new Map<string, number>()
@@ -115,6 +111,13 @@ export default function HomeGraphs({ data }: { data: AllData }) {
 
   // ---- 収支（period に追従） ----
   const chartMonths = useMemo(() => monthRange(period.from, period.to), [period.from, period.to])
+
+  // 選んだ期間の月すべてに沿って出す。負債は返済予定から計算できるので未来の月も値が入り、
+  // 資産の実績が無い月は null（グラフは spanGaps で実績のある区間だけ線を引く）
+  const netWorthSeries = useMemo(
+    () => netWorthOver(chartMonths, data.assets, liabilities),
+    [chartMonths, data, liabilities],
+  )
   const incMap = useMemo(() => effectiveIncomeByMonth(data.furusato_salaries ?? []), [data])
   const expMap = useMemo(() => expenseByMonth(data.expenses), [data])
   const breakdown = useMemo(() => nonInvestBreakdownByMonth(data.assets, principalCap), [data, principalCap])
@@ -359,9 +362,19 @@ export default function HomeGraphs({ data }: { data: AllData }) {
                     { label: '純資産', data: netWorthSeries.map((p) => p.netWorth), borderColor: '#4ade80', backgroundColor: 'rgba(74,222,128,0.12)', fill: true, tension: 0.3, pointRadius: 0 },
                   ],
                 }}
-                options={{ maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: monthYenScales }}
+                options={{
+                  maintainAspectRatio: false,
+                  interaction: { mode: 'index', intersect: false },
+                  scales: monthYenScales,
+                  // 実績の無い月は飛ばして線をつなぐ（未来は実績が無いので線が止まる）
+                  spanGaps: true,
+                }}
               />
             </div>
+            <p className="muted" style={{ fontSize: 11, margin: '4px 0 0' }}>
+              負債は返済予定から計算しているので、期間指定で終了月を未来にすると返済の見通しが先まで見られます
+              （資産・純資産は実績のあるところまで）。
+            </p>
           </div>
         )}
 

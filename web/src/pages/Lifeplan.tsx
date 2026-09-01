@@ -24,7 +24,7 @@ import LifeplanEditor from './LifeplanEditor'
 import ScenarioSurveyCard from './ScenarioSurveyCard'
 import { useStore } from '../store'
 import { DEFAULT_PERSONS } from '../types'
-import { assetTotal, estimateLivingCost, parseBonusConfig, parseProfile, sortedAssets, yen, yenShort } from '../utils'
+import { assetTotal, estimateLivingCost, parseBonusConfig, parseProfile, sortedAssets, totalLiabilitiesAt, yen, yenShort } from '../utils'
 
 const thisYear = new Date().getFullYear()
 
@@ -140,12 +140,23 @@ export default function Lifeplan() {
     return out
   }, [data, persons, cfg])
 
-  // 開始資産の内訳（投資分は運用利回りが効く / 現金・年金は効かない）
+  // 開始資産の内訳（投資分は運用利回りが効く / 現金・年金は効かない）。
+  // 負債は「資産」タブの返済スケジュールから最新記録の時点の残高を出し、**現金側から差し引く**
+  // （借金があっても運用しているお金は減らないため。ライフプランは負債の返済自体は扱っていないので、
+  //  ここで一度だけ差し引いて「負債考慮後の総資産」を開始点にする）
   const latestSnapshot = useMemo(() => {
     const assets = sortedAssets(data?.assets ?? [])
     if (!assets.length) return null
     const a = assets[assets.length - 1]
-    return { total: assetTotal(a), invest: a.investment ?? 0, liquid: (a.cash ?? 0) + (a.pension ?? 0) }
+    const gross = assetTotal(a)
+    const liab = totalLiabilitiesAt(data?.liabilities ?? [], a.date.slice(0, 7))
+    return {
+      gross,
+      liab,
+      total: gross - liab,
+      invest: a.investment ?? 0,
+      liquid: (a.cash ?? 0) + (a.pension ?? 0) - liab,
+    }
   }, [data])
   const latestAssets = latestSnapshot?.total ?? null
 
@@ -171,7 +182,8 @@ export default function Lifeplan() {
   const { startInvest, startLiquid } = useMemo(() => {
     const override = cfg?.start_assets_override ?? null
     if (override !== null) {
-      const ratio = latestSnapshot && latestSnapshot.total > 0 ? latestSnapshot.invest / latestSnapshot.total : 0.7
+      // 比率は負債を引く前の資産構成から出す（引いた後の合計だと比率が1を超えたり負になったりする）
+      const ratio = latestSnapshot && latestSnapshot.gross > 0 ? latestSnapshot.invest / latestSnapshot.gross : 0.7
       return { startInvest: override * ratio, startLiquid: override * (1 - ratio) }
     }
     return { startInvest: latestSnapshot?.invest ?? 0, startLiquid: latestSnapshot?.liquid ?? 0 }
@@ -376,6 +388,9 @@ export default function Lifeplan() {
         livingEstimate={livingEstimate}
         persons={persons}
         latestAssets={latestAssets}
+        liabilityNote={latestSnapshot && latestSnapshot.liab > 0
+          ? `資産 ${yen(latestSnapshot.gross)} − 負債 ${yen(latestSnapshot.liab)} = ${yen(latestSnapshot.total)}`
+          : null}
         originalName={edit.originalName}
         saving={saving}
         onSave={(n) => void commitEdit(n)}

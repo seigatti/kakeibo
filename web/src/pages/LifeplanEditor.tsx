@@ -64,8 +64,10 @@ export interface EditorProps {
   /** 実支出からの基本生活費の推定 */
   livingEstimate: { annual: number; months: number } | null
   persons: string[]
-  /** 最新スナップショットの資産合計（開始資産のプレースホルダ用） */
+  /** 最新スナップショットの資産合計（負債差引後。開始資産のプレースホルダ用） */
   latestAssets: number | null
+  /** 開始資産の内訳の説明（負債を引いていることを示す。無ければ出さない） */
+  liabilityNote?: string | null
   /** 編集対象のシナリオ名。新規作成なら null */
   originalName: string | null
   saving?: boolean
@@ -79,7 +81,7 @@ export interface EditorProps {
  * （プラン画面は普段グラフ・表のみを表示し、修正・新規作成のときだけこの画面に入る）
  */
 export default function LifeplanEditor({
-  cfg, upd, updAdult, updChild, estimatedIncome, pensionEstOf, livingEstimate, persons, latestAssets, originalName, saving, onSave, onCancel,
+  cfg, upd, updAdult, updChild, estimatedIncome, pensionEstOf, livingEstimate, persons, latestAssets, liabilityNote, originalName, saving, onSave, onCancel,
 }: EditorProps) {
   const [saveAs, setSaveAs] = useState('')
   return (
@@ -187,9 +189,17 @@ export default function LifeplanEditor({
             help={<HelpTip title="退職後の基本生活費">全員が退職し終えた年から、基本生活費をこの割合にします（子供費用・カスタム支出は別扱い）。<br />家計調査では高齢無職世帯の消費支出は現役期より小さく、目安は<b>70%程度</b>です。<br />100%のままだと退職後も現役と同額を使い続ける前提になり、結果が厳しめに出ます。</HelpTip>} />
           <div />
         </div>
-        <label className="field">開始資産（空欄=最新の記録を採用）
+        <label className="field">
+          開始資産（空欄=最新の記録を採用）
+          <HelpTip title="開始資産の決まり方">
+            空欄のときは<b>最新の資産記録から負債残高を差し引いた額</b>（＝負債を考慮した総資産）を使います。
+            負債残高は「資産」タブのローンの返済スケジュールから、その時点の残高を計算しています。
+            <br />差し引くのは<b>現金・年金の側</b>で、投資分はそのまま残します（借金があっても運用しているお金は減らないため）。
+            <br />ライフプランはローンの返済自体は扱っていないので、ここで一度だけ差し引く形にしています。
+          </HelpTip>
           <input type="text" inputMode="numeric" placeholder={latestAssets !== null ? `自動: ${amt(latestAssets)}` : ''}
             value={cfg.start_assets_override ?? ''} onChange={(e) => upd({ start_assets_override: numOrNull(e.target.value) })} /></label>
+        {liabilityNote && <p className="muted" style={{ fontSize: 11, margin: '-6px 0 10px' }}>{liabilityNote}</p>}
       </div>
 
       <div className="card">

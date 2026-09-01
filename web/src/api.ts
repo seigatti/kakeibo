@@ -18,23 +18,39 @@ export function saveConfig(cfg: ApiConfig) {
 
 interface ApiResponse {
   ok: boolean
-  data?: AllData
+  data?: AllData | Partial<AllData>
+  /** 書き込み系で「変更したシートだけ」返ってきたことを示す（新しいGASのみ付く） */
+  partial?: boolean
   error?: string
 }
 
-async function parse(res: Response): Promise<AllData> {
+/**
+ * 書き込みの応答。
+ * partial のときは data に含まれるテーブルだけを差し替える（それ以外は手元の状態が正）。
+ * 旧GAS（partial 無し）は全データが来るので、そのまま丸ごと差し替える。
+ */
+export interface MutationResult {
+  data: Partial<AllData>
+  partial: boolean
+}
+
+async function parse(res: Response): Promise<{ data: Partial<AllData>; partial: boolean }> {
   const body: ApiResponse = await res.json()
   if (!body.ok || !body.data) throw new Error(body.error ?? 'APIエラー')
-  return body.data
+  return { data: body.data, partial: body.partial === true }
 }
 
 export async function fetchAll(cfg: ApiConfig): Promise<AllData> {
   const res = await fetch(`${cfg.url}?token=${encodeURIComponent(cfg.token)}`)
-  return parse(res)
+  return (await parse(res)).data as AllData
 }
 
 /** 変更系。GASはpreflight(OPTIONS)を処理できないため text/plain で送る */
-export async function postAction(cfg: ApiConfig, action: string, payload: Record<string, unknown>): Promise<AllData> {
+export async function postAction(
+  cfg: ApiConfig,
+  action: string,
+  payload: Record<string, unknown>,
+): Promise<MutationResult> {
   const res = await fetch(cfg.url, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },

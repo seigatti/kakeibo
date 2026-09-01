@@ -31,7 +31,7 @@ function parseHash(): { tab: TabId; params: URLSearchParams } {
 }
 
 export default function App() {
-  const { config, data, loading, error, refresh } = useStore()
+  const { config, data, loading, error, lastFailed, retry, refresh } = useStore()
   const [route, setRoute] = useState(parseHash)
   const [memoOpen, setMemoOpen] = useState(localStorage.getItem('kakeibo.memoOpen') === '1')
   const [masked, setMaskedState] = useState(localStorage.getItem('kakeibo.masked') === '1')
@@ -92,7 +92,16 @@ export default function App() {
         </div>
       </header>
 
-      {error && <div className="banner error">⚠ {error}</div>}
+      {error && (
+        <div className="banner error">
+          <span>⚠ {error}{lastFailed ? '（表示は保存前に戻しました）' : ''}</span>
+          {lastFailed && (
+            <button className="btn small secondary" style={{ width: 'auto', marginTop: 0 }} onClick={() => void retry()}>
+              再試行
+            </button>
+          )}
+        </div>
+      )}
       {!config && tab !== 'settings' && <div className="banner">設定画面でAPI接続情報を入力してください</div>}
 
       <main className="main">

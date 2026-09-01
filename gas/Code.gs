@@ -62,7 +62,7 @@ function setup() {
 function doGet(e) {
   try {
     checkToken_(e.parameter.token);
-    return json_({ ok: true, data: getAllData_() });
+    return json_({ ok: true, data: getAllData_(), partial: false });
   } catch (err) {
     return json_({ ok: false, error: String(err.message || err) });
   }
@@ -75,7 +75,8 @@ function doPost(e) {
     var body = JSON.parse(e.postData.contents);
     checkToken_(body.token);
     var result = handleAction_(body);
-    return json_({ ok: true, data: result });
+    // result = { data: {...}, partial: true/false }
+    return json_({ ok: true, data: result.data, partial: result.partial });
   } catch (err) {
     return json_({ ok: false, error: String(err.message || err) });
   } finally {
@@ -86,23 +87,23 @@ function doPost(e) {
 function handleAction_(body) {
   switch (body.action) {
     case 'all':
-      return getAllData_();
+      return { data: getAllData_(), partial: false };
     case 'upsertAsset':
       upsertRow_('assets', 'date', body.row);
-      return getAllData_();
+      return { data: partial_(['assets']), partial: true };
     case 'deleteAsset':
       deleteRows_('assets', function (r) { return r.date === body.date; });
-      return getAllData_();
+      return { data: partial_(['assets']), partial: true };
     case 'setExpense':
       if (body.row.amount === null || body.row.amount === '' || body.row.amount === undefined) {
         deleteRows_('expenses', function (r) { return r.month === body.row.month && r.category === body.row.category; });
       } else {
         upsertRow_('expenses', ['month', 'category'], body.row);
       }
-      return getAllData_();
+      return { data: partial_(['expenses']), partial: true };
     case 'setIncome':
       upsertRow_('income', 'month', body.row);
-      return getAllData_();
+      return { data: partial_(['income']), partial: true };
     case 'setMonthData': // 1ヶ月分の収入+変動費(+消費量)をまとめて保存（PWAの収支入力用）
       if (body.income) upsertRow_('income', 'month', body.income);
       (body.expenses || []).forEach(function (row) {
@@ -119,65 +120,66 @@ function handleAction_(body) {
           upsertRow_('consumption', ['month', 'category'], row);
         }
       });
-      return getAllData_();
+      return { data: partial_(['income', 'expenses', 'consumption']), partial: true };
     case 'setMonthsData': // 複数月分の一括登録（CSVインポート用）
       setMonthsData_(body.months || []);
-      return getAllData_();
+      return { data: partial_(['income', 'expenses', 'consumption']), partial: true };
     case 'deleteIncome':
       deleteRows_('income', function (r) { return r.month === body.month; });
-      return getAllData_();
+      return { data: partial_(['income']), partial: true };
     case 'saveFixedCost':
       if (!body.row.id) body.row.id = String(new Date().getTime());
       upsertRow_('fixed_costs', 'id', body.row);
-      return getAllData_();
+      return { data: partial_(['fixed_costs']), partial: true };
     case 'deleteFixedCost':
       deleteRows_('fixed_costs', function (r) { return String(r.id) === String(body.id); });
-      return getAllData_();
+      return { data: partial_(['fixed_costs']), partial: true };
     case 'setZaimNet':
       upsertRow_('zaim_net', 'month', body.row);
-      return getAllData_();
+      return { data: partial_(['zaim_net']), partial: true };
     case 'setSetting':
       upsertRow_('settings', 'key', body.row);
-      return getAllData_();
+      return { data: partial_(['settings']), partial: true };
     case 'saveLiability':
       if (!body.row.id) body.row.id = String(new Date().getTime());
       upsertRow_('liabilities', 'id', body.row);
-      return getAllData_();
+      return { data: partial_(['liabilities']), partial: true };
     case 'deleteLiability':
       deleteRows_('liabilities', function (r) { return String(r.id) === String(body.id); });
-      return getAllData_();
+      return { data: partial_(['liabilities']), partial: true };
     case 'saveMemo':
       if (!body.row.id) body.row.id = String(new Date().getTime());
-      body.row.updated_at = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
+      body.row.updated_at = Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd HH:mm');
       upsertRow_('memos', 'id', body.row);
-      return getAllData_();
+      return { data: partial_(['memos']), partial: true };
     case 'deleteMemo':
       deleteRows_('memos', function (r) { return String(r.id) === String(body.id); });
-      return getAllData_();
+      return { data: partial_(['memos']), partial: true };
     case 'saveFurusatoItem':
       if (!body.row.id) body.row.id = String(new Date().getTime());
       upsertRow_('furusato_items', 'id', body.row);
-      return getAllData_();
+      return { data: partial_(['furusato_items']), partial: true };
     case 'deleteFurusatoItem':
       deleteRows_('furusato_items', function (r) { return String(r.id) === String(body.id); });
-      return getAllData_();
+      return { data: partial_(['furusato_items']), partial: true };
     case 'setFurusatoYear':
       upsertRow_('furusato_years', ['person', 'year'], body.row);
-      return getAllData_();
+      return { data: partial_(['furusato_years']), partial: true };
     case 'setFurusatoSalary':
       upsertRow_('furusato_salaries', ['person', 'year', 'month'], body.row);
-      return getAllData_();
+      return { data: partial_(['furusato_salaries']), partial: true };
     case 'setFurusatoSalaries': // 複数月の一括保存（他月コピー用。シート読み書き1回で処理）
       setFurusatoSalaries_(body.rows || []);
-      return getAllData_();
+      return { data: partial_(['furusato_salaries']), partial: true };
     case 'deleteFurusatoSalary':
       deleteRows_('furusato_salaries', function (r) {
         return r.person === body.person && String(r.year) === String(body.year) && String(r.month) === String(body.month);
       });
-      return getAllData_();
+      return { data: partial_(['furusato_salaries']), partial: true };
     case 'renameFurusatoPerson': // 管理者名の変更（全ふるさと関連シートを一括書き換え）
+      var renameSs = ss_();
       ['furusato_items', 'furusato_years', 'furusato_salaries'].forEach(function (name) {
-        var ss = ss_();
+        var ss = renameSs;
         var rows = readSheet_(ss, name);
         var changed = false;
         rows.forEach(function (r) {
@@ -188,9 +190,9 @@ function handleAction_(body) {
         });
         if (changed) rewriteSheet_(ss, name, rows);
       });
-      return getAllData_();
+      return { data: partial_(['furusato_items', 'furusato_years', 'furusato_salaries']), partial: true };
     case 'bulkImport':
-      return bulkImport_(body);
+      return { data: bulkImport_(body), partial: false };
     default:
       throw new Error('unknown action: ' + body.action);
   }
@@ -219,6 +221,18 @@ function getAllData_() {
   return out;
 }
 
+/**
+ * 指定したシートだけ読んで返す（書き込み後の応答用）。
+ * 以前は毎回 getAllData_() で全12シートを読み直しており、1回の保存で
+ * スプレッドシートへの往復が14回ほど発生していた。触ったシートだけにすると2回で済む。
+ */
+function partial_(names) {
+  var ss = ss_();
+  var out = {};
+  names.forEach(function (n) { out[n] = readSheet_(ss, n); });
+  return out;
+}
+
 function readSheet_(ss, name) {
   var sheet = ss.getSheetByName(name);
   if (!sheet || sheet.getLastRow() < 2) return [];
@@ -233,10 +247,17 @@ function readSheet_(ss, name) {
     });
 }
 
+/** Session.getScriptTimeZone() はセルごとに呼ぶと高くつくので1回だけ取って使い回す */
+var TZ_ = null;
+function tz_() {
+  if (TZ_ === null) TZ_ = Session.getScriptTimeZone();
+  return TZ_;
+}
+
 function normalize_(v, header) {
   if (v instanceof Date) {
     var fmt = header === 'month' || header === 'start_month' || header === 'end_month' ? 'yyyy-MM' : 'yyyy-MM-dd';
-    return Utilities.formatDate(v, Session.getScriptTimeZone(), fmt);
+    return Utilities.formatDate(v, tz_(), fmt);
   }
   if (v === '') return null;
   return v;

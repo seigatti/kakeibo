@@ -21,7 +21,12 @@ import {
   fixedMonthlyTotal,
   monthRange,
   netSalaryByMonth,
+  bucketLabel,
+  bucketMonthCount,
+  bucketsOf,
+  lastByBucket,
   netWorthOver,
+  sumByBucket,
   nonInvestBreakdownByMonth,
   otherIncomeByMonth,
   periodSummary,
@@ -199,7 +204,59 @@ export default function HomeGraphs({ data }: { data: AllData }) {
 
   const yenAxis = { y: { ticks: { callback: (v: unknown) => yenShort(Number(v)) } } }
   const monthYenScales = { ...yenAxis, x: xTicks }
-  const lbl = (m: string) => m.slice(2)
+  // ---- 表示単位（月/年）。系列の性質でまとめ方を変える ----
+  const unit = period.unit
+  /** 月の並び → 横軸ラベル（年単位で12ヶ月に満たない区切りは「2023(2ヶ月)」） */
+  const axisOf = (months: string[]) => {
+    const keys = bucketsOf(months, unit)
+    const counts = bucketMonthCount(months, unit)
+    return keys.map((b, i) => bucketLabel(b, unit, counts[i]))
+  }
+  /** フロー（収入・支出・消費量など）は区切りごとに合計 */
+  const flow = (months: string[], v: (m: string) => number | null) => sumByBucket(months, unit, v)
+  /** ストック（資産・負債・純資産・割合など）は区切りの最後の値 */
+  const stock = (months: string[], v: (m: string) => number | null) => lastByBucket(months, unit, v)
+  /** 日付つきの記録は、年単位ならその年の最後の記録だけ残す（月単位は記録ごとにそのまま） */
+  const rowsByUnit = <T extends { date: string }>(rows: T[]): T[] => {
+    if (unit === 'month') return rows
+    const out: T[] = []
+    for (const r of rows) {
+      if (out.length && out[out.length - 1].date.slice(0, 4) === r.date.slice(0, 4)) out[out.length - 1] = r
+      else out.push(r)
+    }
+    return out
+  }
+  const rowLbl = (d: string) => (unit === 'year' ? d.slice(0, 4) : d.slice(2, 10))
+
+  // 純資産・投資増減はグラフ側から月をキーに引くので、参照用のマップを作っておく
+  const netWorthMonths = netWorthSeries.map((p) => p.month)
+  const netWorthMap = new Map(netWorthSeries.map((p) => [p.month, p]))
+  const netWorthAt = (m: string) => netWorthMap.get(m) ?? null
+  const gainMap = new Map(gains)
+  const gainSeries = flow(gains.map(([m]) => m), (m) => gainMap.get(m) ?? null)
+
+  // 累積収支は「積み上がった値」なので区切りの最後を採る
+  const cumMonths = cumulative.map((r) => r.m)
+  const cumMap = new Map(cumulative.map((r) => [r.m, r]))
+  const cumAt = (m: string) => cumMap.get(m) ?? null
+
+  // 支出の平均。年平均は「月平均×12」で出す
+  // （期間の端の半端な年をそのまま平均すると、実態より小さく出てしまうため）
+  const expenseAvg = useMemo(() => {
+    const vals = cfChartMonths.map((m) => totalExp(m)).filter((v) => v > 0)
+    if (!vals.length) return null
+    const perMonth = vals.reduce((a, b) => a + b, 0) / vals.length
+    return { perMonth: Math.round(perMonth), perYear: Math.round(perMonth * 12), months: vals.length }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cfChartMonths, expMap, incMap, breakdown])
+
+  // 貯蓄率は月ごとの％を平均せず、区切りの収入合計・支出合計から計算し直す
+  const srMonths = savingsRate.map((p) => p.month)
+  const srIncome = flow(srMonths, (m) => incMap.get(m) ?? null)
+  const srExpense = flow(srMonths, (m) => (incMap.has(m) ? totalExp(m) : null))
+  const srSeries = srIncome.map((inc, i) =>
+    inc && inc > 0 ? Math.round(((inc - (srExpense[i] ?? 0)) / inc) * 1000) / 10 : null,
+  )
 
   return (
     <>
@@ -294,7 +351,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
       )}
 
       {/* 期間バーはここに1本だけ。親が .main なのでページ末尾まで追従する */}
-      <PeriodPicker period={period} note="ホームの全グラフ共通" />
+      <PeriodPicker period={period} note="ホームの全グラフ共通" unitToggle />
 
       {/* ===================== 資産 ===================== */}
       <Collapsible variant="section" defaultOpen title="📈 資産のグラフ">
@@ -305,12 +362,12 @@ export default function HomeGraphs({ data }: { data: AllData }) {
             <div className="chart-box">
               <Line
                 data={{
-                  labels: assetRecent.map((a) => a.date.slice(2, 10)),
+                  labels: rowsByUnit(assetRecent).map((a) => rowLbl(a.date)),
                   datasets: [
-                    { label: '合計', data: assetRecent.map(assetTotal), borderColor: '#38bdf8', tension: 0.3, pointRadius: 0 },
-                    { label: '投資', data: assetRecent.map((a) => a.investment), borderColor: '#4ade80', tension: 0.3, pointRadius: 0 },
-                    { label: '現金', data: assetRecent.map((a) => a.cash), borderColor: '#fbbf24', tension: 0.3, pointRadius: 0 },
-                    { label: '年金', data: assetRecent.map((a) => a.pension), borderColor: '#c084fc', tension: 0.3, pointRadius: 0 },
+                    { label: '合計', data: rowsByUnit(assetRecent).map(assetTotal), borderColor: '#38bdf8', tension: 0.3, pointRadius: 0 },
+                    { label: '投資', data: rowsByUnit(assetRecent).map((a) => a.investment), borderColor: '#4ade80', tension: 0.3, pointRadius: 0 },
+                    { label: '現金', data: rowsByUnit(assetRecent).map((a) => a.cash), borderColor: '#fbbf24', tension: 0.3, pointRadius: 0 },
+                    { label: '年金', data: rowsByUnit(assetRecent).map((a) => a.pension), borderColor: '#c084fc', tension: 0.3, pointRadius: 0 },
                   ],
                 }}
                 options={{ maintainAspectRatio: false, spanGaps: true, interaction: { mode: 'index', intersect: false }, scales: monthYenScales }}
@@ -325,11 +382,11 @@ export default function HomeGraphs({ data }: { data: AllData }) {
             <div className="chart-box small">
               <Line
                 data={{
-                  labels: allocTrend.map((p) => lbl(p.month)),
+                  labels: axisOf(allocTrend.map((p) => p.month)),
                   datasets: [
-                    { label: '投資', data: allocTrend.map((p) => p.investPct), borderColor: '#4ade80', tension: 0.3, pointRadius: 0 },
-                    { label: '現金', data: allocTrend.map((p) => p.cashPct), borderColor: '#38bdf8', tension: 0.3, pointRadius: 0 },
-                    { label: '年金', data: allocTrend.map((p) => p.pensionPct), borderColor: '#c084fc', tension: 0.3, pointRadius: 0 },
+                    { label: '投資', data: stock(allocTrend.map((p) => p.month), (m) => allocTrend.find((p) => p.month === m)?.investPct ?? null), borderColor: '#4ade80', tension: 0.3, pointRadius: 0 },
+                    { label: '現金', data: stock(allocTrend.map((p) => p.month), (m) => allocTrend.find((p) => p.month === m)?.cashPct ?? null), borderColor: '#38bdf8', tension: 0.3, pointRadius: 0 },
+                    { label: '年金', data: stock(allocTrend.map((p) => p.month), (m) => allocTrend.find((p) => p.month === m)?.pensionPct ?? null), borderColor: '#c084fc', tension: 0.3, pointRadius: 0 },
                   ],
                 }}
                 options={{
@@ -355,11 +412,11 @@ export default function HomeGraphs({ data }: { data: AllData }) {
             <div className="chart-box small">
               <Line
                 data={{
-                  labels: netWorthSeries.map((p) => lbl(p.month)),
+                  labels: axisOf(netWorthSeries.map((p) => p.month)),
                   datasets: [
-                    { label: '資産', data: netWorthSeries.map((p) => p.assets), borderColor: '#38bdf8', tension: 0.3, pointRadius: 0 },
-                    { label: '負債', data: netWorthSeries.map((p) => -p.liabilities), borderColor: '#f87171', tension: 0.3, pointRadius: 0 },
-                    { label: '純資産', data: netWorthSeries.map((p) => p.netWorth), borderColor: '#4ade80', backgroundColor: 'rgba(74,222,128,0.12)', fill: true, tension: 0.3, pointRadius: 0 },
+                    { label: '資産', data: stock(netWorthMonths, (m) => netWorthAt(m)?.assets ?? null), borderColor: '#38bdf8', tension: 0.3, pointRadius: 0 },
+                    { label: '負債', data: stock(netWorthMonths, (m) => { const p = netWorthAt(m); return p ? -p.liabilities : null }), borderColor: '#f87171', tension: 0.3, pointRadius: 0 },
+                    { label: '純資産', data: stock(netWorthMonths, (m) => netWorthAt(m)?.netWorth ?? null), borderColor: '#4ade80', backgroundColor: 'rgba(74,222,128,0.12)', fill: true, tension: 0.3, pointRadius: 0 },
                   ],
                 }}
                 options={{
@@ -385,7 +442,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
             <h2>評価損益（累計）の推移</h2>
             <div className="chart-box small">
               <Line
-                data={{ labels: profits.map((a) => a.date.slice(2, 10)), datasets: [{ label: '評価損益', data: profits.map((a) => a.mf_profit), borderColor: '#4ade80', backgroundColor: 'rgba(74,222,128,0.15)', fill: true, tension: 0.3 }] }}
+                data={{ labels: rowsByUnit(profits).map((a) => rowLbl(a.date)), datasets: [{ label: '評価損益', data: rowsByUnit(profits).map((a) => a.mf_profit), borderColor: '#4ade80', backgroundColor: 'rgba(74,222,128,0.15)', fill: true, tension: 0.3 }] }}
                 options={{ maintainAspectRatio: false, spanGaps: true, plugins: { legend: { display: false } }, scales: monthYenScales }}
               />
             </div>
@@ -397,7 +454,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
             <h2>今月の投資増減の推移</h2>
             <div className="chart-box small">
               <Bar
-                data={{ labels: gains.map(([m]) => lbl(m)), datasets: [{ label: '今月の投資増減', data: gains.map(([, v]) => v), backgroundColor: gains.map(([, v]) => (v >= 0 ? '#4ade80' : '#f87171')) }] }}
+                data={{ labels: axisOf(gains.map(([m]) => m)), datasets: [{ label: unit === 'year' ? '投資増減（年合計）' : '今月の投資増減', data: gainSeries, backgroundColor: gainSeries.map((v) => ((v ?? 0) >= 0 ? '#4ade80' : '#f87171')) }] }}
                 options={{ maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: monthYenScales }}
               />
             </div>
@@ -442,11 +499,11 @@ export default function HomeGraphs({ data }: { data: AllData }) {
             <div className="chart-box" style={{ marginTop: 10 }}>
               <Line
                 data={{
-                  labels: cumulative.map((r) => lbl(r.m)),
+                  labels: axisOf(cumulative.map((r) => r.m)),
                   datasets: [
-                    { label: '累積収入', data: cumulative.map((r) => r.cin), borderColor: '#4ade80', backgroundColor: 'rgba(74,222,128,0.12)', fill: true, tension: 0.2 },
-                    { label: '累積支出', data: cumulative.map((r) => r.cout), borderColor: '#f87171', backgroundColor: 'rgba(248,113,113,0.10)', fill: true, tension: 0.2 },
-                    { label: '累積収支', data: cumulative.map((r) => r.cin - r.cout), borderColor: '#38bdf8', borderDash: [6, 4], tension: 0.2 },
+                    { label: '累積収入', data: stock(cumMonths, (m) => cumAt(m)?.cin ?? null), borderColor: '#4ade80', backgroundColor: 'rgba(74,222,128,0.12)', fill: true, tension: 0.2 },
+                    { label: '累積支出', data: stock(cumMonths, (m) => cumAt(m)?.cout ?? null), borderColor: '#f87171', backgroundColor: 'rgba(248,113,113,0.10)', fill: true, tension: 0.2 },
+                    { label: '累積収支', data: stock(cumMonths, (m) => { const r = cumAt(m); return r ? r.cin - r.cout : null }), borderColor: '#38bdf8', borderDash: [6, 4], tension: 0.2 },
                   ],
                 }}
                 options={{
@@ -468,18 +525,33 @@ export default function HomeGraphs({ data }: { data: AllData }) {
         {chartMonths.length >= 2 && (
           <>
           <div className="card">
-            <h2>収入 vs 全支出（投資除く）</h2>
+            <h2>
+              収入 vs 全支出（投資除く）
+              <HelpTip title="支出合計と平均">
+                太い黄色の線が<b>支出合計</b>（固定費＋変動費＋その他支出）です。積み上げ棒の高さと同じで、
+                「ひと月に出ていく総額」の輪郭を見るためのものです。
+                <br />平均は<b>支出が記録されている月だけ</b>で平均し、年あたりは<b>月平均×12</b>で出しています
+                （期間の端の半端な年をそのまま平均すると実態より小さく出るため）。
+              </HelpTip>
+            </h2>
+            {expenseAvg && (
+              <div className="kv" style={{ fontSize: 13 }}>
+                <span className="muted">支出の平均（{expenseAvg.months}ヶ月分）</span>
+                <span>月 {yen(expenseAvg.perMonth)} / 年 {yen(expenseAvg.perYear)}</span>
+              </div>
+            )}
             <div className="chart-box">
               <Chart
                 type="bar"
                 data={{
-                  labels: cfChartMonths.map(lbl),
+                  labels: axisOf(cfChartMonths),
                   datasets: [
-                    { type: 'bar' as const, label: '収入', data: cfChartMonths.map((m) => incMap.get(m) ?? 0), backgroundColor: '#4ade80', stack: 'in' },
-                    { type: 'bar' as const, label: '固定費', data: cfChartMonths.map((m) => -fixedOf(m)), backgroundColor: '#fb923c', stack: 'out' },
-                    { type: 'bar' as const, label: '変動費', data: cfChartMonths.map((m) => -(expMap.get(m) ?? 0)), backgroundColor: '#f87171', stack: 'out' },
-                    { type: 'bar' as const, label: 'その他支出', data: cfChartMonths.map((m) => { const o = otherOf(m); return o === null ? null : -o }), backgroundColor: '#c084fc', stack: 'out' },
-                    { type: 'line' as const, label: '収支', data: cfChartMonths.map((m) => (incMap.get(m) ?? 0) - totalExp(m)), borderColor: '#38bdf8', tension: 0.3, stack: 'balance' },
+                    { type: 'bar' as const, label: '収入', data: flow(cfChartMonths, (m) => incMap.get(m) ?? 0), backgroundColor: '#4ade80', stack: 'in' },
+                    { type: 'bar' as const, label: '固定費', data: flow(cfChartMonths, (m) => -fixedOf(m)), backgroundColor: '#fb923c', stack: 'out' },
+                    { type: 'bar' as const, label: '変動費', data: flow(cfChartMonths, (m) => -(expMap.get(m) ?? 0)), backgroundColor: '#f87171', stack: 'out' },
+                    { type: 'bar' as const, label: 'その他支出', data: flow(cfChartMonths, (m) => { const o = otherOf(m); return o === null ? null : -o }), backgroundColor: '#c084fc', stack: 'out' },
+                    { type: 'line' as const, label: '支出合計', data: flow(cfChartMonths, (m) => -totalExp(m)), borderColor: '#fbbf24', borderWidth: 3, tension: 0.3, pointRadius: 0, stack: 'total' },
+                    { type: 'line' as const, label: '収支', data: flow(cfChartMonths, (m) => (incMap.get(m) ?? 0) - totalExp(m)), borderColor: '#38bdf8', tension: 0.3, stack: 'balance' },
                   ],
                 }}
                 options={{ maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { x: { stacked: true, ...xTicks }, y: { stacked: true, ticks: { callback: (v) => yenShort(Number(v)) } } } }}
@@ -499,7 +571,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
                 <div className="kv"><span className="muted">最小</span><b className={srStats.min < 0 ? 'neg' : ''}>{srStats.min}%</b></div>
                 <div className="chart-box small" style={{ marginTop: 8 }}>
                   <Bar
-                    data={{ labels: savingsRate.map((p) => lbl(p.month)), datasets: [{ label: '貯蓄率', data: savingsRate.map((p) => p.rate), backgroundColor: savingsRate.map((p) => (p.rate >= 0 ? '#4ade80' : '#f87171')) }] }}
+                    data={{ labels: axisOf(savingsRate.map((p) => p.month)), datasets: [{ label: '貯蓄率', data: srSeries, backgroundColor: srSeries.map((v) => ((v ?? 0) >= 0 ? '#4ade80' : '#f87171')) }] }}
                     options={{ maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `貯蓄率: ${ctx.parsed.y}%` } } }, scales: { y: { ticks: { callback: (v) => `${v}%` } }, x: xTicks } }}
                   />
                 </div>
@@ -543,7 +615,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
             <h2>変動費カテゴリ別の推移</h2>
             <div className="chart-box">
               <Line
-                data={{ labels: cfChartMonths.map(lbl), datasets: [...catTrend.entries()].map(([cat, map], i) => ({ label: cat, data: cfChartMonths.map((m) => map.get(m) ?? null), borderColor: PALETTE[i % PALETTE.length], tension: 0.3 })) }}
+                data={{ labels: axisOf(cfChartMonths), datasets: [...catTrend.entries()].map(([cat, map], i) => ({ label: cat, data: flow(cfChartMonths, (m) => map.get(m) ?? null), borderColor: PALETTE[i % PALETTE.length], tension: 0.3 })) }}
                 options={{ maintainAspectRatio: false, spanGaps: true, interaction: { mode: 'index', intersect: false }, scales: monthYenScales }}
               />
             </div>
@@ -600,7 +672,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
             <h2>消費量の推移</h2>
             <div className="chart-box">
               <Line
-                data={{ labels: consMonths.map(lbl), datasets: consumptionCats.map((cat, i) => ({ label: `${cat}(${CONSUMPTION_UNITS[cat]})`, data: consMonths.map((m) => qtyByCat.get(cat)?.get(m) ?? null), borderColor: PALETTE[i % PALETTE.length], tension: 0.3 })) }}
+                data={{ labels: axisOf(consMonths), datasets: consumptionCats.map((cat, i) => ({ label: `${cat}(${CONSUMPTION_UNITS[cat]})`, data: flow(consMonths, (m) => qtyByCat.get(cat)?.get(m) ?? null), borderColor: PALETTE[i % PALETTE.length], tension: 0.3 })) }}
                 options={{ maintainAspectRatio: false, spanGaps: true, interaction: { mode: 'index', intersect: false }, scales: { x: xTicks } }}
               />
             </div>
@@ -611,17 +683,18 @@ export default function HomeGraphs({ data }: { data: AllData }) {
             <div className="chart-box">
               <Line
                 data={{
-                  labels: consMonths.map(lbl),
-                  datasets: consumptionCats.map((cat, i) => ({
-                    label: `${cat}(円/${CONSUMPTION_UNITS[cat]})`,
-                    data: consMonths.map((m) => {
-                      const q = qtyByCat.get(cat)?.get(m)
-                      const amount = data.expenses.find((e) => e.month === m && e.category === cat)?.amount
-                      return q && q > 0 && amount ? Math.round((amount / q) * 10) / 10 : null
-                    }),
-                    borderColor: PALETTE[i % PALETTE.length],
-                    tension: 0.3,
-                  })),
+                  labels: axisOf(consMonths),
+                  datasets: consumptionCats.map((cat, i) => {
+                    // 単価は月ごとの単価を平均せず、区切りの「金額合計 ÷ 数量合計」で出す
+                    const qty = flow(consMonths, (m) => qtyByCat.get(cat)?.get(m) ?? null)
+                    const amt = flow(consMonths, (m) => data.expenses.find((e) => e.month === m && e.category === cat)?.amount ?? null)
+                    return {
+                      label: `${cat}(円/${CONSUMPTION_UNITS[cat]})`,
+                      data: qty.map((q, k) => (q && q > 0 && amt[k] ? Math.round((amt[k]! / q) * 10) / 10 : null)),
+                      borderColor: PALETTE[i % PALETTE.length],
+                      tension: 0.3,
+                    }
+                  }),
                 }}
                 options={{ maintainAspectRatio: false, spanGaps: true, interaction: { mode: 'index', intersect: false }, scales: { x: xTicks } }}
               />

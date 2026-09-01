@@ -97,13 +97,13 @@ body {
   background: var(--bg2);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 14px;
-  margin-bottom: 12px;
+  padding: 12px;
+  margin-bottom: 10px;
 }
 
 .card h2 {
   font-size: 14px;
-  margin: 0 0 10px;
+  margin: 0 0 6px;
   color: var(--muted);
   font-weight: 600;
 }
@@ -241,7 +241,7 @@ button {
   justify-content: space-between;
   align-items: center;
   gap: 8px;
-  padding: 9px 2px;
+  padding: 7px 2px;
   border-bottom: 1px solid var(--border);
   font-size: 14px;
 }
@@ -253,16 +253,16 @@ button {
 .kv {
   display: flex;
   justify-content: space-between;
-  padding: 4px 0;
+  padding: 3px 0;
   font-size: 14px;
 }
 
 .chart-box {
-  height: 260px;
+  height: 190px;
 }
 
 .chart-box.small {
-  height: 180px;
+  height: 135px;
 }
 
 .seg {

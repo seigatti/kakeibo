@@ -36,6 +36,12 @@ import { isMasked } from './utils'
 Chart.register(ChartDataLabels)
 Chart.defaults.set('plugins.datalabels', { display: false })
 
+// 凡例は既定だと箱・余白が大きくグラフ枠の高さを食うので、全体的に小さくする
+Chart.defaults.plugins.legend.labels.boxWidth = 10
+Chart.defaults.plugins.legend.labels.boxHeight = 10
+Chart.defaults.plugins.legend.labels.padding = 8
+Chart.defaults.plugins.legend.labels.font = { size: 11 }
+
 Chart.defaults.color = '#94a3b8'
 Chart.defaults.borderColor = 'rgba(148, 163, 184, 0.15)'
 Chart.defaults.font.family =

@@ -917,3 +917,73 @@ export function dataMonthRange(expenses: ExpenseRow[], income: IncomeRow[], extr
   months.sort()
   return monthRange(months[0], months[months.length - 1])
 }
+
+// ---- グラフの表示単位（月/年） ----
+
+export type Unit = 'month' | 'year'
+
+/** その月がどの区切りに属するか（年単位なら 'YYYY'） */
+const bucketOf = (month: string, unit: Unit) => (unit === 'year' ? month.slice(0, 4) : month)
+
+/** 月の並び → 表示する区切りの並び（重複なし・元の順序を保つ） */
+export function bucketsOf(months: string[], unit: Unit): string[] {
+  if (unit === 'month') return months
+  const out: string[] = []
+  for (const m of months) {
+    const b = bucketOf(m, unit)
+    if (out[out.length - 1] !== b) out.push(b)
+  }
+  return out
+}
+
+/** 区切りごとに、その区切りに属する月を並べる */
+function groupMonths(months: string[], unit: Unit): string[][] {
+  const buckets = bucketsOf(months, unit)
+  const map = new Map<string, string[]>(buckets.map((b) => [b, []]))
+  for (const m of months) map.get(bucketOf(m, unit))!.push(m)
+  return buckets.map((b) => map.get(b)!)
+}
+
+/**
+ * フロー系（収入・支出・消費量など）を区切りごとに合計する。
+ * 値が無い(null)月は飛ばし、その区切りに1つも値が無ければ null。
+ */
+export function sumByBucket(months: string[], unit: Unit, valueOf: (m: string) => number | null): (number | null)[] {
+  return groupMonths(months, unit).map((ms) => {
+    let sum = 0
+    let has = false
+    for (const m of ms) {
+      const v = valueOf(m)
+      if (v !== null && v !== undefined && Number.isFinite(v)) {
+        sum += v
+        has = true
+      }
+    }
+    return has ? sum : null
+  })
+}
+
+/**
+ * ストック系（資産・負債・純資産・評価損益など）は合計せず、
+ * その区切りで**最後に値がある月**の値を採る（＝年末時点の残高）。
+ */
+export function lastByBucket(months: string[], unit: Unit, valueOf: (m: string) => number | null): (number | null)[] {
+  return groupMonths(months, unit).map((ms) => {
+    for (let i = ms.length - 1; i >= 0; i--) {
+      const v = valueOf(ms[i])
+      if (v !== null && v !== undefined && Number.isFinite(v)) return v
+    }
+    return null
+  })
+}
+
+/** その区切りに何ヶ月分入っているか（期間の端の半端な年を示すのに使う） */
+export function bucketMonthCount(months: string[], unit: Unit): number[] {
+  return groupMonths(months, unit).map((ms) => ms.length)
+}
+
+/** グラフの横軸ラベル。年単位で12ヶ月に満たない区切りは「2023(4ヶ月)」と補足する */
+export function bucketLabel(bucket: string, unit: Unit, monthCount: number): string {
+  if (unit === 'month') return bucket.slice(2)
+  return monthCount < 12 ? `${bucket}(${monthCount}ヶ月)` : bucket
+}

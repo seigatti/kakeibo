@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { addMonths, thisMonth } from '../utils'
+import { addMonths, thisMonth, type Unit } from '../utils'
 
 export type Preset = 'year' | '12m' | 'all' | 'custom'
 
@@ -31,6 +31,9 @@ export function inRange(m: string, from: string, to: string): boolean {
 export interface Period {
   preset: Preset
   setPreset: (p: Preset) => void
+  /** グラフの点の単位（月ごと / 年ごと） */
+  unit: Unit
+  setUnit: (u: Unit) => void
   cf: string
   setCf: (v: string) => void
   ct: string
@@ -49,14 +52,18 @@ export function usePeriod(earliest: string): Period {
   const [preset, setPreset] = useState<Preset>('all')
   const [cf, setCf] = useState('')
   const [ct, setCt] = useState('')
+  const [unit, setUnit] = useState<Unit>('month')
   const month = thisMonth()
   const [from, to] = rangeOf(preset, month, earliest, cf, ct)
-  return { preset, setPreset, cf, setCf, ct, setCt, from, to, earliest }
+  return { preset, setPreset, unit, setUnit, cf, setCf, ct, setCt, from, to, earliest }
 }
 
-/** 期間選択UI（このセクションの全グラフが参照する） */
-export default function PeriodPicker({ period, note }: { period: Period; note?: string }) {
-  const { preset, setPreset, cf, setCf, ct, setCt, from, to, earliest } = period
+/**
+ * 期間選択UI（このセクションの全グラフが参照する）。
+ * @param unitToggle 月/年の切替を出すか（対応済みのページだけ true にする）
+ */
+export default function PeriodPicker({ period, note, unitToggle }: { period: Period; note?: string; unitToggle?: boolean }) {
+  const { preset, setPreset, unit, setUnit, cf, setCf, ct, setCt, from, to, earliest } = period
   return (
     <div className="card period-picker">
       <div className="seg">
@@ -70,6 +77,12 @@ export default function PeriodPicker({ period, note }: { period: Period; note?: 
             <input type="month" value={cf || earliest} onChange={(e) => setCf(e.target.value)} /></label>
           <label className="field">終了月
             <input type="month" value={ct || thisMonth()} onChange={(e) => setCt(e.target.value)} /></label>
+        </div>
+      )}
+      {unitToggle && (
+        <div className="seg" style={{ marginBottom: 8 }}>
+          <button className={unit === 'month' ? 'on' : ''} onClick={() => setUnit('month')}>月単位</button>
+          <button className={unit === 'year' ? 'on' : ''} onClick={() => setUnit('year')}>年単位</button>
         </div>
       )}
       <p className="muted" style={{ fontSize: 12, margin: 0 }}>

@@ -1,12 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { fetchAll, loadConfig, postAction, saveConfig, type ApiConfig } from './api'
-import { applyMutation, withGeneratedId } from './mutations'
+import { replayPending, withGeneratedId, type Pending } from './mutations'
 import type { AllData } from './types'
-
-interface FailedMutation {
-  action: string
-  payload: Record<string, unknown>
-}
 
 interface Store {
   config: ApiConfig | null
@@ -15,7 +10,7 @@ interface Store {
   error: string | null
   saving: boolean
   /** 直近で失敗した保存（再試行ボタン用）。成功したら null に戻る */
-  lastFailed: FailedMutation | null
+  lastFailed: Pending | null
   setConfig: (cfg: ApiConfig) => void
   refresh: () => Promise<void>
   mutate: (action: string, payload: Record<string, unknown>) => Promise<void>
@@ -31,20 +26,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [lastFailed, setLastFailed] = useState<FailedMutation | null>(null)
+  const [lastFailed, setLastFailed] = useState<Pending | null>(null)
 
-  // 楽観更新の差分は「今の状態」から作る必要があるが、setState は非同期なので
-  // 常に最新を指す ref を正とし、state はその写しとして更新する。
-  const dataRef = useRef<AllData | null>(null)
-  const setStore = useCallback((next: AllData | null) => {
-    dataRef.current = next
-    setData(next)
+  // 画面 = 「サーバが確定した状態」に「まだ確定していない保存」を積み直したもの。
+  // 応答が返るたびに作り直すので、先に返った応答が後から積んだ楽観更新を消すことがない。
+  const serverRef = useRef<AllData | null>(null)
+  const pendingRef = useRef<Pending[]>([])
+
+  /** 確定状態＋未確定分から画面用の状態を作り直す */
+  const recompute = useCallback(() => {
+    const server = serverRef.current
+    setData(server ? replayPending(server, pendingRef.current) : null)
+    setSaving(pendingRef.current.length > 0)
   }, [])
 
-  // 送信は必ず1本ずつ直列に流す。裏で送るようになると連続保存が追い越し合い、
-  // 古い応答で新しい内容が上書きされることがあるため。
+  // 送信は必ず1本ずつ直列に流す（連続保存が追い越し合わないように）
   const queue = useRef<Promise<unknown>>(Promise.resolve())
-  const inflight = useRef(0)
 
   const refresh = useCallback(async () => {
     const cfg = loadConfig()
@@ -52,13 +49,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setLoading(true)
     setError(null)
     try {
-      setStore(await fetchAll(cfg))
+      serverRef.current = await fetchAll(cfg)
+      recompute() // 未確定分は保持したまま作り直す
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
     }
-  }, [setStore])
+  }, [recompute])
 
   useEffect(() => {
     void refresh()
@@ -74,8 +72,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   )
 
   /**
-   * 保存。楽観更新できるアクションは**先に画面へ反映してから**裏で送る。
-   * 失敗したら送信前の状態へ巻き戻し、再試行できるようにする。
+   * 保存。未確定リストへ積んで即座に画面へ反映し、送信は裏で直列に行う。
+   * 成否が決まったらその1件だけをリストから外して作り直す。
    */
   const mutate = useCallback(
     async (action: string, rawPayload: Record<string, unknown>) => {
@@ -84,44 +82,39 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
       // GASが採番していた id / updated_at は先にこちらで確定させる（ローカルとサーバでズレないように）
       const payload = withGeneratedId(action, rawPayload)
+      const entry: Pending = { action, payload }
 
-      // 送信前の状態を控えてから、先に画面へ反映する
-      const rollback = dataRef.current
-      if (rollback) {
-        const next = applyMutation(rollback, action, payload)
-        if (next) setStore(next)
-      }
-
+      pendingRef.current = [...pendingRef.current, entry]
+      recompute()
       setError(null)
-      setSaving(true)
-      inflight.current += 1
+
+      /** この1件を未確定リストから外す */
+      const drop = () => {
+        pendingRef.current = pendingRef.current.filter((p) => p !== entry)
+      }
 
       const task = queue.current.then(async () => {
         try {
           const res = await postAction(cfg, action, payload)
-          // サーバの返した内容が正。partial なら該当テーブルだけ差し替える
-          if (res.partial) {
-            const base = dataRef.current
-            if (base) setStore({ ...base, ...res.data } as AllData)
-          } else {
-            setStore(res.data as AllData)
-          }
+          // サーバの返した内容を確定状態へ反映（partial なら該当テーブルだけ）
+          const base = serverRef.current
+          serverRef.current = res.partial && base ? ({ ...base, ...res.data } as AllData) : (res.data as AllData)
+          drop()
+          recompute() // 残りの未確定分は積み直されるので消えない
           setLastFailed(null)
         } catch (e) {
-          if (rollback) setStore(rollback) // 画面を送信前へ戻す
+          drop()
+          recompute() // 失敗した1件だけ取り消す（他の未確定分はそのまま）
           setError(e instanceof Error ? e.message : String(e))
-          setLastFailed({ action, payload })
+          setLastFailed(entry)
           throw e
-        } finally {
-          inflight.current -= 1
-          if (inflight.current === 0) setSaving(false)
         }
       })
       // 1件失敗しても後続を止めない（キューは常に解決済みのもので繋ぐ）
       queue.current = task.catch(() => undefined)
       return task
     },
-    [setStore],
+    [recompute],
   )
 
   const retry = useCallback(async () => {

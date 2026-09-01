@@ -167,3 +167,22 @@ export function applyMutation(data: AllData, action: string, payload: Record<str
   if (!row) return null
   return { ...data, [table]: upsertInto(rows, row, spec.keys) } as AllData
 }
+
+/** まだサーバに確定していない保存 */
+export interface Pending {
+  action: string
+  payload: Record<string, unknown>
+}
+
+/**
+ * サーバが確定した状態に、未確定の保存を順に積み直して画面用の状態を作る。
+ *
+ * 応答が返るたびに「確定状態＋まだ残っている未確定分」で作り直すことで、
+ * 先に返ってきた応答が、後から積んだ楽観更新を消してしまうのを防ぐ。
+ * applyMutation が null を返すアクション（setMonthData など）は素通しになる。
+ */
+export function replayPending(server: AllData, pending: Pending[]): AllData {
+  let out = server
+  for (const p of pending) out = applyMutation(out, p.action, p.payload) ?? out
+  return out
+}

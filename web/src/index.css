@@ -372,6 +372,43 @@ button {
   top: var(--header-h);
   z-index: 5; /* カード(auto)より上・ヘッダー/タブバー(10)より下 */
   box-shadow: 0 6px 12px -6px rgba(0, 0, 0, 0.6);
+  /* 常時画面上部に居座るので、余白と文字を詰めて占有を最小にする */
+  padding: 3px 6px;
+  margin-bottom: 4px;
+  border-radius: 8px;
+}
+
+.period-picker .seg {
+  gap: 4px;
+  margin-bottom: 3px;
+}
+
+.period-picker .seg:last-child,
+.period-picker > :last-child {
+  margin-bottom: 0;
+}
+
+.period-picker .seg button {
+  padding: 3px;
+  font-size: 11px;
+}
+
+/* 期間指定の月入力（選んだときだけ出る）も詰める */
+.period-picker .field {
+  font-size: 10px;
+  margin-bottom: 3px;
+}
+
+.period-picker .field input {
+  padding: 4px;
+  margin-top: 2px;
+  font-size: 12px;
+}
+
+/* 表示期間の説明。バーの直下に置くが、固定追従はしない（バーの外の要素） */
+.period-note {
+  font-size: 11px;
+  margin: 0 2px 8px;
 }
 
 /* プランの表示範囲: 全部入りのカードは貼り付かせず普通に流し、上に消えきったら

@@ -64,32 +64,37 @@ export function usePeriod(earliest: string): Period {
  */
 export default function PeriodPicker({ period, note, unitToggle }: { period: Period; note?: string; unitToggle?: boolean }) {
   const { preset, setPreset, unit, setUnit, cf, setCf, ct, setCt, from, to, earliest } = period
+  // 表示期間のテキストは**カードの外**に置く。
+  // position: sticky は要素まるごとに効くため、中に入れると一緒に貼り付いてしまい、
+  // 常時表示される固定領域が無駄に高くなるので、操作するボタンだけを固定する。
   return (
-    <div className="card period-picker">
-      <div className="seg">
-        {PRESETS.map(([p, label]) => (
-          <button key={p} className={preset === p ? 'on' : ''} onClick={() => setPreset(p)}>{label}</button>
-        ))}
+    <>
+      <div className="card period-picker">
+        <div className="seg">
+          {PRESETS.map(([p, label]) => (
+            <button key={p} className={preset === p ? 'on' : ''} onClick={() => setPreset(p)}>{label}</button>
+          ))}
+        </div>
+        {preset === 'custom' && (
+          <div className="row2">
+            <label className="field">開始月
+              <input type="month" value={cf || earliest} onChange={(e) => setCf(e.target.value)} /></label>
+            <label className="field">終了月
+              <input type="month" value={ct || thisMonth()} onChange={(e) => setCt(e.target.value)} /></label>
+          </div>
+        )}
+        {unitToggle && (
+          <div className="seg">
+            <button className={unit === 'month' ? 'on' : ''} onClick={() => setUnit('month')}>月単位</button>
+            <button className={unit === 'year' ? 'on' : ''} onClick={() => setUnit('year')}>年単位</button>
+          </div>
+        )}
       </div>
-      {preset === 'custom' && (
-        <div className="row2">
-          <label className="field">開始月
-            <input type="month" value={cf || earliest} onChange={(e) => setCf(e.target.value)} /></label>
-          <label className="field">終了月
-            <input type="month" value={ct || thisMonth()} onChange={(e) => setCt(e.target.value)} /></label>
-        </div>
-      )}
-      {unitToggle && (
-        <div className="seg" style={{ marginBottom: 8 }}>
-          <button className={unit === 'month' ? 'on' : ''} onClick={() => setUnit('month')}>月単位</button>
-          <button className={unit === 'year' ? 'on' : ''} onClick={() => setUnit('year')}>年単位</button>
-        </div>
-      )}
-      <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+      <p className="muted period-note">
         表示期間: {from} 〜 {to}
         {note ? `（${note}）` : ''}
         {preset === 'custom' && to > thisMonth() && <><br />※終了月が未来なので、負債の返済予定は先まで表示されます（実績が無い資産・収支は途切れます）</>}
       </p>
-    </div>
+    </>
   )
 }

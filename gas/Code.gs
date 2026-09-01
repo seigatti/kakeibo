@@ -85,101 +85,66 @@ function doPost(e) {
 }
 
 function handleAction_(body) {
+  // 書き込み系は「触ったシートの内容」だけを返す（partial: true）。
+  // 各ヘルパーが書き込み後の行を返すので、応答のためにシートを読み直さない。
   switch (body.action) {
     case 'all':
       return { data: getAllData_(), partial: false };
     case 'upsertAsset':
-      upsertRow_('assets', 'date', body.row);
-      return { data: partial_(['assets']), partial: true };
+      return one_('assets', upsertRow_('assets', 'date', body.row));
     case 'deleteAsset':
-      deleteRows_('assets', function (r) { return r.date === body.date; });
-      return { data: partial_(['assets']), partial: true };
+      return one_('assets', deleteRows_('assets', function (r) { return r.date === body.date; }));
     case 'setExpense':
-      if (body.row.amount === null || body.row.amount === '' || body.row.amount === undefined) {
-        deleteRows_('expenses', function (r) { return r.month === body.row.month && r.category === body.row.category; });
-      } else {
-        upsertRow_('expenses', ['month', 'category'], body.row);
-      }
-      return { data: partial_(['expenses']), partial: true };
+      return one_('expenses', isBlank_(body.row.amount)
+        ? deleteRows_('expenses', function (r) { return r.month === body.row.month && r.category === body.row.category; })
+        : upsertRow_('expenses', ['month', 'category'], body.row));
     case 'setIncome':
-      upsertRow_('income', 'month', body.row);
-      return { data: partial_(['income']), partial: true };
+      return one_('income', upsertRow_('income', 'month', body.row));
     case 'setMonthData': // 1ヶ月分の収入+変動費(+消費量)をまとめて保存（PWAの収支入力用）
-      if (body.income) upsertRow_('income', 'month', body.income);
-      (body.expenses || []).forEach(function (row) {
-        if (row.amount === null || row.amount === '' || row.amount === undefined) {
-          deleteRows_('expenses', function (r) { return r.month === row.month && r.category === row.category; });
-        } else {
-          upsertRow_('expenses', ['month', 'category'], row);
-        }
-      });
-      (body.consumption || []).forEach(function (row) {
-        if (row.quantity === null || row.quantity === '' || row.quantity === undefined) {
-          deleteRows_('consumption', function (r) { return r.month === row.month && r.category === row.category; });
-        } else {
-          upsertRow_('consumption', ['month', 'category'], row);
-        }
-      });
-      return { data: partial_(['income', 'expenses', 'consumption']), partial: true };
+      return { data: applyMonths_([{ income: body.income, expenses: body.expenses, consumption: body.consumption }]), partial: true };
     case 'setMonthsData': // 複数月分の一括登録（CSVインポート用）
-      setMonthsData_(body.months || []);
-      return { data: partial_(['income', 'expenses', 'consumption']), partial: true };
+      return { data: applyMonths_(body.months || []), partial: true };
     case 'deleteIncome':
-      deleteRows_('income', function (r) { return r.month === body.month; });
-      return { data: partial_(['income']), partial: true };
+      return one_('income', deleteRows_('income', function (r) { return r.month === body.month; }));
     case 'saveFixedCost':
       if (!body.row.id) body.row.id = String(new Date().getTime());
-      upsertRow_('fixed_costs', 'id', body.row);
-      return { data: partial_(['fixed_costs']), partial: true };
+      return one_('fixed_costs', upsertRow_('fixed_costs', 'id', body.row));
     case 'deleteFixedCost':
-      deleteRows_('fixed_costs', function (r) { return String(r.id) === String(body.id); });
-      return { data: partial_(['fixed_costs']), partial: true };
+      return one_('fixed_costs', deleteRows_('fixed_costs', function (r) { return String(r.id) === String(body.id); }));
     case 'setZaimNet':
-      upsertRow_('zaim_net', 'month', body.row);
-      return { data: partial_(['zaim_net']), partial: true };
+      return one_('zaim_net', upsertRow_('zaim_net', 'month', body.row));
     case 'setSetting':
-      upsertRow_('settings', 'key', body.row);
-      return { data: partial_(['settings']), partial: true };
+      return one_('settings', upsertRow_('settings', 'key', body.row));
     case 'saveLiability':
       if (!body.row.id) body.row.id = String(new Date().getTime());
-      upsertRow_('liabilities', 'id', body.row);
-      return { data: partial_(['liabilities']), partial: true };
+      return one_('liabilities', upsertRow_('liabilities', 'id', body.row));
     case 'deleteLiability':
-      deleteRows_('liabilities', function (r) { return String(r.id) === String(body.id); });
-      return { data: partial_(['liabilities']), partial: true };
+      return one_('liabilities', deleteRows_('liabilities', function (r) { return String(r.id) === String(body.id); }));
     case 'saveMemo':
       if (!body.row.id) body.row.id = String(new Date().getTime());
       body.row.updated_at = Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd HH:mm');
-      upsertRow_('memos', 'id', body.row);
-      return { data: partial_(['memos']), partial: true };
+      return one_('memos', upsertRow_('memos', 'id', body.row));
     case 'deleteMemo':
-      deleteRows_('memos', function (r) { return String(r.id) === String(body.id); });
-      return { data: partial_(['memos']), partial: true };
+      return one_('memos', deleteRows_('memos', function (r) { return String(r.id) === String(body.id); }));
     case 'saveFurusatoItem':
       if (!body.row.id) body.row.id = String(new Date().getTime());
-      upsertRow_('furusato_items', 'id', body.row);
-      return { data: partial_(['furusato_items']), partial: true };
+      return one_('furusato_items', upsertRow_('furusato_items', 'id', body.row));
     case 'deleteFurusatoItem':
-      deleteRows_('furusato_items', function (r) { return String(r.id) === String(body.id); });
-      return { data: partial_(['furusato_items']), partial: true };
+      return one_('furusato_items', deleteRows_('furusato_items', function (r) { return String(r.id) === String(body.id); }));
     case 'setFurusatoYear':
-      upsertRow_('furusato_years', ['person', 'year'], body.row);
-      return { data: partial_(['furusato_years']), partial: true };
+      return one_('furusato_years', upsertRow_('furusato_years', ['person', 'year'], body.row));
     case 'setFurusatoSalary':
-      upsertRow_('furusato_salaries', ['person', 'year', 'month'], body.row);
-      return { data: partial_(['furusato_salaries']), partial: true };
-    case 'setFurusatoSalaries': // 複数月の一括保存（他月コピー用。シート読み書き1回で処理）
-      setFurusatoSalaries_(body.rows || []);
-      return { data: partial_(['furusato_salaries']), partial: true };
+      return one_('furusato_salaries', upsertRow_('furusato_salaries', ['person', 'year', 'month'], body.row));
+    case 'setFurusatoSalaries': // 複数月の一括保存（他月コピー用）
+      return one_('furusato_salaries', setFurusatoSalaries_(body.rows || []));
     case 'deleteFurusatoSalary':
-      deleteRows_('furusato_salaries', function (r) {
+      return one_('furusato_salaries', deleteRows_('furusato_salaries', function (r) {
         return r.person === body.person && String(r.year) === String(body.year) && String(r.month) === String(body.month);
-      });
-      return { data: partial_(['furusato_salaries']), partial: true };
+      }));
     case 'renameFurusatoPerson': // 管理者名の変更（全ふるさと関連シートを一括書き換え）
-      var renameSs = ss_();
+      var ss = ss_();
+      var renamed = {};
       ['furusato_items', 'furusato_years', 'furusato_salaries'].forEach(function (name) {
-        var ss = renameSs;
         var rows = readSheet_(ss, name);
         var changed = false;
         rows.forEach(function (r) {
@@ -189,13 +154,21 @@ function handleAction_(body) {
           }
         });
         if (changed) rewriteSheet_(ss, name, rows);
+        renamed[name] = outRows_(name, rows);
       });
-      return { data: partial_(['furusato_items', 'furusato_years', 'furusato_salaries']), partial: true };
+      return { data: renamed, partial: true };
     case 'bulkImport':
       return { data: bulkImport_(body), partial: false };
     default:
       throw new Error('unknown action: ' + body.action);
   }
+}
+
+/** 1シートぶんの部分応答 */
+function one_(name, rows) {
+  var out = {};
+  out[name] = rows;
+  return { data: out, partial: true };
 }
 
 // ---------------------------------------------------------------- core
@@ -206,10 +179,14 @@ function checkToken_(token) {
   if (!token || token !== expected) throw new Error('invalid token');
 }
 
+/** 1リクエスト中に何度も呼ばれるので、開いたスプレッドシートは使い回す */
+var SS_CACHE_ = null;
 function ss_() {
+  if (SS_CACHE_) return SS_CACHE_;
   var id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
   if (!id) throw new Error('setup 未実行です（SPREADSHEET_ID がありません）');
-  return SpreadsheetApp.openById(id);
+  SS_CACHE_ = SpreadsheetApp.openById(id);
+  return SS_CACHE_;
 }
 
 function getAllData_() {
@@ -218,18 +195,6 @@ function getAllData_() {
   Object.keys(SHEET_DEFS).forEach(function (name) {
     out[name] = readSheet_(ss, name);
   });
-  return out;
-}
-
-/**
- * 指定したシートだけ読んで返す（書き込み後の応答用）。
- * 以前は毎回 getAllData_() で全12シートを読み直しており、1回の保存で
- * スプレッドシートへの往復が14回ほど発生していた。触ったシートだけにすると2回で済む。
- */
-function partial_(names) {
-  var ss = ss_();
-  var out = {};
-  names.forEach(function (n) { out[n] = readSheet_(ss, n); });
   return out;
 }
 
@@ -278,10 +243,13 @@ function upsertRow_(sheetName, keyCols, rowObj) {
     var match = keys.every(function (k) { return String(existing[i][k]) === String(rowObj[k]); });
     if (match) {
       sheet.getRange(i + 2, 1, 1, headers.length).setValues([newRow]);
-      return;
+      existing[i] = rowObj;
+      return outRows_(sheetName, existing);
     }
   }
   sheet.appendRow(newRow);
+  existing.push(rowObj);
+  return outRows_(sheetName, existing);
 }
 
 function deleteRows_(sheetName, predicate) {
@@ -291,6 +259,7 @@ function deleteRows_(sheetName, predicate) {
   for (var i = rows.length - 1; i >= 0; i--) {
     if (predicate(rows[i])) sheet.deleteRow(i + 2);
   }
+  return outRows_(sheetName, rows.filter(function (r) { return !predicate(r); }));
 }
 
 /** 一括投入（既存Excelからの移行用）。mode: 'replace'(既定) or 'append' */
@@ -318,28 +287,62 @@ function bulkImport_(body) {
 }
 
 /** 複数月分の income + expenses を一括反映（シート全体を読み→マージ→書き戻しで高速化） */
-function setMonthsData_(months) {
+/**
+ * 月ごとの収入・変動費・消費量をまとめて反映する。
+ * 行ごとに upsertRow_ を呼ぶとその都度シートを丸ごと読み直してしまうため、
+ * 「必要なシートを1回読む → メモリで差し替え → 1回書き戻す」形にしている。
+ * 戻り値は書き込んだシートの内容（応答にそのまま使うので読み直さない）。
+ */
+function applyMonths_(months) {
   var ss = ss_();
-  var incomeRows = readSheet_(ss, 'income');
-  var expenseRows = readSheet_(ss, 'expenses');
+  var need = { income: false, expenses: false, consumption: false };
+  months.forEach(function (m) {
+    if (m.income) need.income = true;
+    if (m.expenses && m.expenses.length) need.expenses = true;
+    if (m.consumption && m.consumption.length) need.consumption = true;
+  });
+
+  var rows = {};
+  ['income', 'expenses', 'consumption'].forEach(function (n) {
+    if (need[n]) rows[n] = readSheet_(ss, n);
+  });
+
+  var same = function (a, b) { return String(a) === String(b); };
+  var replace = function (list, row, valueCol) {
+    var out = list.filter(function (r) {
+      return !(same(r.month, row.month) && same(r.category, row.category));
+    });
+    if (!isBlank_(row[valueCol])) out.push(row);
+    return out;
+  };
+
   months.forEach(function (m) {
     if (m.income) {
-      incomeRows = incomeRows.filter(function (r) { return r.month !== m.income.month; });
-      incomeRows.push(m.income);
+      rows.income = rows.income.filter(function (r) { return !same(r.month, m.income.month); });
+      rows.income.push(m.income);
     }
-    (m.expenses || []).forEach(function (row) {
-      expenseRows = expenseRows.filter(function (r) { return !(r.month === row.month && r.category === row.category); });
-      if (row.amount !== null && row.amount !== undefined && row.amount !== '') expenseRows.push(row);
+    (m.expenses || []).forEach(function (row) { rows.expenses = replace(rows.expenses, row, 'amount'); });
+    (m.consumption || []).forEach(function (row) { rows.consumption = replace(rows.consumption, row, 'quantity'); });
+  });
+
+  var out = {};
+  if (need.income) {
+    rows.income.sort(function (a, b) { return String(a.month).localeCompare(String(b.month)); });
+    rewriteSheet_(ss, 'income', rows.income);
+    out.income = outRows_('income', rows.income);
+  }
+  ['expenses', 'consumption'].forEach(function (n) {
+    if (!need[n]) return;
+    rows[n].sort(function (a, b) {
+      return String(a.month).localeCompare(String(b.month)) || String(a.category).localeCompare(String(b.category));
     });
+    rewriteSheet_(ss, n, rows[n]);
+    out[n] = outRows_(n, rows[n]);
   });
-  incomeRows.sort(function (a, b) { return String(a.month).localeCompare(String(b.month)); });
-  expenseRows.sort(function (a, b) {
-    return String(a.month).localeCompare(String(b.month)) || String(a.category).localeCompare(String(b.category));
-  });
-  rewriteSheet_(ss, 'income', incomeRows);
-  rewriteSheet_(ss, 'expenses', expenseRows);
+  return out;
 }
 
+/** 複数月の給与をまとめて反映（シート読み書き1回で処理） */
 function setFurusatoSalaries_(newRows) {
   var ss = ss_();
   var rows = readSheet_(ss, 'furusato_salaries');
@@ -353,20 +356,49 @@ function setFurusatoSalaries_(newRows) {
     return String(a.person).localeCompare(String(b.person)) || (a.year - b.year) || (a.month - b.month);
   });
   rewriteSheet_(ss, 'furusato_salaries', rows);
+  return outRows_('furusato_salaries', rows);
 }
 
+/**
+ * rows を2行目以降へ一括で書き戻す。
+ * 全行を消してから書き直すのではなく「定義列だけ setValues して、余った行だけ削る」ので、
+ * シートの右側に手で足した列は消えない。
+ */
 function rewriteSheet_(ss, name, rows) {
   var sheet = ss.getSheetByName(name);
   var headers = SHEET_DEFS[name];
-  if (sheet.getLastRow() > 1) sheet.deleteRows(2, sheet.getLastRow() - 1);
-  if (!rows.length) return;
-  var values = rows.map(function (r) {
-    return headers.map(function (h) {
-      var v = r[h];
-      return v === undefined || v === null ? '' : v;
+  var lastRow = sheet.getLastRow();
+  if (rows.length) {
+    var values = rows.map(function (r) {
+      return headers.map(function (h) {
+        var v = r[h];
+        return v === undefined || v === null ? '' : v;
+      });
     });
+    sheet.getRange(2, 1, values.length, headers.length).setValues(values);
+  }
+  var surplus = lastRow - 1 - rows.length;
+  if (surplus > 0) sheet.deleteRows(2 + rows.length, surplus);
+}
+
+/** 空欄扱いの値か */
+function isBlank_(v) {
+  return v === null || v === undefined || v === '';
+}
+
+/**
+ * 書き込んだ行を「シートから読み直したときと同じ形」に整える（空文字→null）。
+ * 応答をこの形に揃えておかないと、保存直後の画面とリロード後の画面で値の表現がズレる。
+ */
+function outRows_(name, rows) {
+  var headers = SHEET_DEFS[name];
+  return rows.map(function (r) {
+    var o = {};
+    headers.forEach(function (h) {
+      o[h] = isBlank_(r[h]) ? null : r[h];
+    });
+    return o;
   });
-  sheet.getRange(2, 1, values.length, headers.length).setValues(values);
 }
 
 // ---------------------------------------------------------------- メール自動取り込み

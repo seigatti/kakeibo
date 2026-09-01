@@ -30,7 +30,7 @@ Chart.register(
 )
 
 import ChartDataLabels from 'chartjs-plugin-datalabels'
-import { isMasked } from './utils'
+import { isMasked, yen } from './utils'
 
 // 値ラベル表示プラグイン。既定はOFFにして、使いたいチャートだけ options で有効化する
 Chart.register(ChartDataLabels)
@@ -64,6 +64,7 @@ Chart.defaults.plugins.tooltip.callbacks = {
     } else {
       v = raw as number
     }
-    return `${name}: ${Number(v).toLocaleString('ja-JP')}円`
+    // 金額は円未満切り捨て（消費量・単価のグラフは各自 tooltip を上書きしてここを通らない）
+    return `${name}: ${yen(v)}`
   },
 }

@@ -31,21 +31,31 @@ export const setMasked = (v: boolean) => {
 }
 export const isMasked = () => masked
 
-export const yen = (v: number | null | undefined) =>
-  v === null || v === undefined ? '−' : masked ? '＊＊＊円' : `${Math.round(v).toLocaleString('ja-JP')}円`
-
-export const yenShort = (v: number) =>
-  masked
-    ? '＊＊＊'
-    : Math.abs(v) >= 10000
-      ? `${(v / 10000).toLocaleString('ja-JP', { maximumFractionDigits: 0 })}万`
-      : `${v.toLocaleString('ja-JP')}`
-
 /**
- * プレースホルダ等に金額を直接埋めるときに使う（マスク対応の toLocaleString）。
- * yen() と同じく円未満は丸める（負債残高など小数が出る値をそのまま出さないため）。
+ * 金額表示は**円未満を切り捨てる**（0に近づく向き）。
+ * 固定費の月割り（年払い÷12）やローン残高、平均額などで小数が出るため。
+ * プラスもマイナスも「小数を捨てる」で揃える（-1234.7 → -1234）。
+ * ※消費量・単価は小数に意味があるので、この関数は通さない。
  */
-export const amt = (v: number) => (masked ? '＊＊＊' : Math.round(v).toLocaleString('ja-JP'))
+export const cutYen = (v: number) => {
+  const n = Math.trunc(v)
+  // Math.trunc(-0.5) は -0 になり、そのまま出すと「-0円」と表示されてしまう
+  return n === 0 ? 0 : n
+}
+
+export const yen = (v: number | null | undefined) =>
+  v === null || v === undefined ? '−' : masked ? '＊＊＊円' : `${cutYen(v).toLocaleString('ja-JP')}円`
+
+export const yenShort = (v: number) => {
+  if (masked) return '＊＊＊'
+  const n = cutYen(v)
+  return Math.abs(n) >= 10000
+    ? `${(n / 10000).toLocaleString('ja-JP', { maximumFractionDigits: 0 })}万`
+    : `${n.toLocaleString('ja-JP')}`
+}
+
+/** プレースホルダ等に金額を直接埋めるときに使う（マスク対応・円未満切り捨て） */
+export const amt = (v: number) => (masked ? '＊＊＊' : cutYen(v).toLocaleString('ja-JP'))
 
 export const thisMonth = () => new Date().toISOString().slice(0, 7)
 export const today = () => new Date().toISOString().slice(0, 10)

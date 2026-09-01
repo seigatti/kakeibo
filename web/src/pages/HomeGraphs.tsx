@@ -24,6 +24,7 @@ import {
   bucketLabel,
   bucketMonthCount,
   bucketsOf,
+  isMasked,
   lastByBucket,
   netWorthOver,
   sumByBucket,
@@ -227,6 +228,12 @@ export default function HomeGraphs({ data }: { data: AllData }) {
     return out
   }
   const rowLbl = (d: string) => (unit === 'year' ? d.slice(0, 4) : d.slice(2, 10))
+
+  // 消費量・単価は金額ではないので、共通ツールチップ（円・円未満切り捨て）ではなく単位付きで出す
+  const qtyTip = (cat: string, v: number | null) =>
+    `${cat}: ${isMasked() || v === null ? '＊＊＊' : v.toLocaleString('ja-JP')} ${CONSUMPTION_UNITS[cat] ?? ''}`
+  const priceTip = (cat: string, v: number | null) =>
+    `${cat}: ${isMasked() || v === null ? '＊＊＊' : v.toLocaleString('ja-JP')} 円/${CONSUMPTION_UNITS[cat] ?? ''}`
 
   // 純資産・投資増減はグラフ側から月をキーに引くので、参照用のマップを作っておく
   const netWorthMonths = netWorthSeries.map((p) => p.month)
@@ -673,7 +680,12 @@ export default function HomeGraphs({ data }: { data: AllData }) {
             <div className="chart-box">
               <Line
                 data={{ labels: axisOf(consMonths), datasets: consumptionCats.map((cat, i) => ({ label: `${cat}(${CONSUMPTION_UNITS[cat]})`, data: flow(consMonths, (m) => qtyByCat.get(cat)?.get(m) ?? null), borderColor: PALETTE[i % PALETTE.length], tension: 0.3 })) }}
-                options={{ maintainAspectRatio: false, spanGaps: true, interaction: { mode: 'index', intersect: false }, scales: { x: xTicks } }}
+                options={{
+                  maintainAspectRatio: false, spanGaps: true,
+                  interaction: { mode: 'index', intersect: false }, scales: { x: xTicks },
+                  // 数量は金額ではないので、共通ツールチップ（円・切り捨て）を使わず小数のまま単位を付ける
+                  plugins: { tooltip: { callbacks: { label: (ctx) => qtyTip(consumptionCats[ctx.datasetIndex], ctx.parsed.y) } } },
+                }}
               />
             </div>
           </div>
@@ -696,7 +708,12 @@ export default function HomeGraphs({ data }: { data: AllData }) {
                     }
                   }),
                 }}
-                options={{ maintainAspectRatio: false, spanGaps: true, interaction: { mode: 'index', intersect: false }, scales: { x: xTicks } }}
+                options={{
+                  maintainAspectRatio: false, spanGaps: true,
+                  interaction: { mode: 'index', intersect: false }, scales: { x: xTicks },
+                  // 単価は円だが小数に意味があるので、切り捨てずにそのまま出す
+                  plugins: { tooltip: { callbacks: { label: (ctx) => priceTip(consumptionCats[ctx.datasetIndex], ctx.parsed.y) } } },
+                }}
               />
             </div>
           </div>

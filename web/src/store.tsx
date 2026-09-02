@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { fetchAll, loadConfig, postAction, saveConfig, type ApiConfig } from './api'
+import { loadCache, saveCache } from './dataCache'
 import { replayPending, withGeneratedId, type Pending } from './mutations'
 import type { AllData } from './types'
 
@@ -11,8 +12,11 @@ interface Store {
   saving: boolean
   /** 直近で失敗した保存（再試行ボタン用）。成功したら null に戻る */
   lastFailed: Pending | null
+  /** キャッシュを表示していて、まだ最新を取れていない（＝取得に失敗した）状態 */
+  stale: boolean
   setConfig: (cfg: ApiConfig) => void
-  refresh: () => Promise<void>
+  /** @param fresh ↻ボタンから。GAS側のキャッシュも素通しして必ず最新を取る */
+  refresh: (fresh?: boolean) => Promise<void>
   mutate: (action: string, payload: Record<string, unknown>) => Promise<void>
   /** lastFailed をもう一度送る */
   retry: () => Promise<void>
@@ -22,16 +26,26 @@ const StoreContext = createContext<Store | null>(null)
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [config, setConfigState] = useState<ApiConfig | null>(loadConfig())
-  const [data, setData] = useState<AllData | null>(null)
+  // 前回のデータがあれば最初から入れておく（GASの応答を待たずに画面を出すため）
+  const [data, setData] = useState<AllData | null>(() => {
+    const cfg = loadConfig()
+    return cfg ? loadCache(cfg) : null
+  })
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [lastFailed, setLastFailed] = useState<Pending | null>(null)
 
+  const [stale, setStale] = useState(false)
+
   // 画面 = 「サーバが確定した状態」に「まだ確定していない保存」を積み直したもの。
   // 応答が返るたびに作り直すので、先に返った応答が後から積んだ楽観更新を消すことがない。
+  // 起動時は前回のキャッシュを入れておき、GASの応答を待たずに描画できるようにする。
   const serverRef = useRef<AllData | null>(null)
   const pendingRef = useRef<Pending[]>([])
+  // data の初期値と同じキャッシュを serverRef にも入れておく。
+  // ここが null のままだと、最初の保存や取得失敗で recompute() が画面を空にしてしまう。
+  if (serverRef.current === null && data !== null) serverRef.current = data
 
   /** 確定状態＋未確定分から画面用の状態を作り直す */
   const recompute = useCallback(() => {
@@ -43,16 +57,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // 送信は必ず1本ずつ直列に流す（連続保存が追い越し合わないように）
   const queue = useRef<Promise<unknown>>(Promise.resolve())
 
-  const refresh = useCallback(async () => {
+  /**
+   * 最新を取り直す。**キャッシュの有無にかかわらず起動のたびに必ず呼ぶ**ので、
+   * 古い表示が残り続けることはない（成功したら必ず画面を差し替える）。
+   * @param fresh ↻ボタンから。GAS側の短時間キャッシュも素通しする
+   */
+  const refresh = useCallback(async (fresh = false) => {
     const cfg = loadConfig()
     if (!cfg) return
     setLoading(true)
     setError(null)
     try {
-      serverRef.current = await fetchAll(cfg)
+      serverRef.current = await fetchAll(cfg, fresh)
+      saveCache(cfg, serverRef.current)
+      setStale(false)
       recompute() // 未確定分は保持したまま作り直す
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+      // 取得に失敗したときだけ「キャッシュを表示中」と分かるようにする
+      // （黙って古いまま出さない。serverRef のキャッシュはそのまま残す）
+      if (serverRef.current) setStale(true)
     } finally {
       setLoading(false)
     }
@@ -99,6 +123,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // サーバの返した内容を確定状態へ反映（partial なら該当テーブルだけ）
           const base = serverRef.current
           serverRef.current = res.partial && base ? ({ ...base, ...res.data } as AllData) : (res.data as AllData)
+          saveCache(cfg, serverRef.current) // 次の起動が最新の状態から始まるように
           drop()
           recompute() // 残りの未確定分は積み直されるので消えない
           setLastFailed(null)
@@ -125,8 +150,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [lastFailed, mutate])
 
   const value = useMemo(
-    () => ({ config, data, loading, error, saving, lastFailed, setConfig, refresh, mutate, retry }),
-    [config, data, loading, error, saving, lastFailed, setConfig, refresh, mutate, retry],
+    () => ({ config, data, loading, error, saving, lastFailed, stale, setConfig, refresh, mutate, retry }),
+    [config, data, loading, error, saving, lastFailed, stale, setConfig, refresh, mutate, retry],
   )
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
 }

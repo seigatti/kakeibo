@@ -117,6 +117,13 @@ body {
   font-size: 13px;
 }
 
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .banner.error {
   border-color: var(--red);
   color: var(--red);

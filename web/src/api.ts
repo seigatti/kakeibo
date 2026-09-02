@@ -40,8 +40,13 @@ async function parse(res: Response): Promise<{ data: Partial<AllData>; partial: 
   return { data: body.data, partial: body.partial === true }
 }
 
-export async function fetchAll(cfg: ApiConfig): Promise<AllData> {
-  const res = await fetch(`${cfg.url}?token=${encodeURIComponent(cfg.token)}`)
+/**
+ * 全データ取得。
+ * @param fresh true ならGAS側の短時間キャッシュを素通しして必ず最新を読む（↻ボタン用）
+ */
+export async function fetchAll(cfg: ApiConfig, fresh = false): Promise<AllData> {
+  const url = `${cfg.url}?token=${encodeURIComponent(cfg.token)}${fresh ? '&fresh=1' : ''}`
+  const res = await fetch(url)
   return (await parse(res)).data as AllData
 }
 

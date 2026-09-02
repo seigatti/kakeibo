@@ -31,7 +31,7 @@ function parseHash(): { tab: TabId; params: URLSearchParams } {
 }
 
 export default function App() {
-  const { config, data, loading, error, lastFailed, retry, refresh } = useStore()
+  const { config, data, loading, error, lastFailed, stale, retry, refresh } = useStore()
   const [route, setRoute] = useState(parseHash)
   const [memoOpen, setMemoOpen] = useState(localStorage.getItem('kakeibo.memoOpen') === '1')
   const [masked, setMaskedState] = useState(localStorage.getItem('kakeibo.masked') === '1')
@@ -86,7 +86,7 @@ export default function App() {
           <button className={memoOpen ? 'icon-btn on' : 'icon-btn'} onClick={() => toggleMemo(!memoOpen)} title="メモ">
             📝
           </button>
-          <button className="icon-btn" onClick={() => void refresh()} disabled={loading} title="再読み込み">
+          <button className="icon-btn" onClick={() => void refresh(true)} disabled={loading} title="再読み込み（必ず最新を取得）">
             {loading ? '…' : '↻'}
           </button>
         </div>
@@ -103,6 +103,14 @@ export default function App() {
         </div>
       )}
       {!config && tab !== 'settings' && <div className="banner">設定画面でAPI接続情報を入力してください</div>}
+      {stale && (
+        <div className="banner">
+          <span>📴 オフライン表示中（前回のデータ。最新の取得に失敗しました）</span>
+          <button className="btn small secondary" style={{ width: 'auto', marginTop: 0 }} onClick={() => void refresh(true)}>
+            再取得
+          </button>
+        </div>
+      )}
 
       <main className="main">
         {tab === 'home' && <Dashboard />}

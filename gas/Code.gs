@@ -59,10 +59,47 @@ function setup() {
 
 // ---------------------------------------------------------------- HTTP entry
 
+/**
+ * 起動時の全データ取得。全12シートを読むので、短時間だけキャッシュして使い回す。
+ * 書き込みのたびに破棄するので、自分の保存が古い値で上書きされて見えることはない。
+ * fresh=1（アプリの↻ボタン）はキャッシュを素通しして必ず読み直す。
+ */
+var CACHE_KEY_ = 'all_v1';
+var CACHE_SEC_ = 60;
+/** CacheService の1件あたりの上限は100KB。余裕を見てこれを超えたらキャッシュしない */
+var CACHE_MAX_ = 90 * 1024;
+
+function dropCache_() {
+  try {
+    CacheService.getScriptCache().remove(CACHE_KEY_);
+  } catch (e) {
+    /* キャッシュが使えなくても本体の処理には影響させない */
+  }
+}
+
 function doGet(e) {
   try {
     checkToken_(e.parameter.token);
-    return json_({ ok: true, data: getAllData_(), partial: false });
+    var fresh = e.parameter.fresh === '1';
+    var cache = null;
+    try {
+      cache = CacheService.getScriptCache();
+    } catch (e2) {
+      cache = null;
+    }
+    if (!fresh && cache) {
+      var hit = cache.get(CACHE_KEY_);
+      if (hit) return ContentService.createTextOutput(hit).setMimeType(ContentService.MimeType.JSON);
+    }
+    var body = JSON.stringify({ ok: true, data: getAllData_(), partial: false });
+    if (cache && body.length <= CACHE_MAX_) {
+      try {
+        cache.put(CACHE_KEY_, body, CACHE_SEC_);
+      } catch (e3) {
+        /* 入らなくても支障はない */
+      }
+    }
+    return ContentService.createTextOutput(body).setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
     return json_({ ok: false, error: String(err.message || err) });
   }
@@ -75,6 +112,7 @@ function doPost(e) {
     var body = JSON.parse(e.postData.contents);
     checkToken_(body.token);
     var result = handleAction_(body);
+    dropCache_(); // 書き込んだので起動時キャッシュは捨てる（次の取得で必ず最新になる）
     // result = { data: {...}, partial: true/false }
     return json_({ ok: true, data: result.data, partial: result.partial });
   } catch (err) {

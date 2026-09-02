@@ -5,6 +5,19 @@ import { VitePWA } from 'vite-plugin-pwa'
 // base './' 相対パスにすることで GitHub Pages のリポジトリ名に依存しない
 export default defineConfig({
   base: './',
+  build: {
+    rollupOptions: {
+      output: {
+        // React と chart.js はアプリ本体と違って滅多に変わらないので別ファイルにする。
+        // こうするとアプリを更新しても、再ダウンロードされるのはアプリ側のチャンクだけで済む
+        // （以前は1本のバンドルだったので、毎回200KB弱をまるごと取り直していた）。
+        manualChunks: {
+          vendor: ['react', 'react-dom', 'react-dom/client'],
+          charts: ['chart.js', 'react-chartjs-2', 'chartjs-plugin-datalabels'],
+        },
+      },
+    },
+  },
   plugins: [
     react(),
     VitePWA({

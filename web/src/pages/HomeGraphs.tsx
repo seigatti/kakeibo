@@ -243,14 +243,14 @@ export default function HomeGraphs({ data }: { data: AllData }) {
     return m && carriedAt(m) ? '※ この月は記録が無いため前月から引き継ぎ' : ''
   }
   /**
-   * 評価損益。月単位は「その月末の累計」、年単位は「その年に増えた分」。
-   * 年の増加分には前年末の累計が要るので、表示期間の外（実績の最古月）から計算してから期間で切る。
+   * 評価損益。mf_profit は**その月の増減**（累計ではない）なので、
+   * 月単位はその月の値、年単位はその年の合計を出す。
    */
   const profitSeries = useMemo(
     () =>
       profitBuckets(data.assets, assetAllMonths, unit, month)
         .filter((b) => bucketInRange(b.bucket, unit, period.from, period.to))
-        .filter((b) => (unit === 'year' ? b.gain !== null : b.cumulative !== null)),
+        .filter((b) => b.total !== null),
     [data, assetAllMonths, unit, month, period.from, period.to],
   )
 
@@ -343,7 +343,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
               </div>
               {typeof latest.mf_profit === 'number' && (
                 <div className="stat">
-                  <span className="k">評価損益</span>
+                  <span className="k">評価損益（今月）</span>
                   <span className={`v ${latest.mf_profit >= 0 ? 'pos' : 'neg'}`}>{yen(latest.mf_profit)}</span>
                 </div>
               )}
@@ -483,60 +483,29 @@ export default function HomeGraphs({ data }: { data: AllData }) {
         {profitSeries.length >= 2 && (
           <div className="card">
             <h2>
-              {unit === 'year' ? '評価損益（その年の増加分）' : '評価損益（累計）の推移'}
+              {unit === 'year' ? '評価損益（年合計）' : '評価損益の推移（その月の増減）'}
               <HelpTip title="評価損益の見かた">
-                マネーフォワードの「評価損益」は<b>買ったときからの累計</b>です。
-                <br /><b>月単位</b>はその月末時点の累計をそのまま出します。
-                <br /><b>年単位</b>は累計をそのまま出すと「その年にいくら増えたか」が読み取れないので、
-                <b>（その年の最後の値）−（前年の最後の値）</b>＝その年に増えた評価損益を出しています。
-                月ごとの増減を1年ぶん足し合わせた額と同じです。
-                <br /><b>記録が始まった最初の年</b>は引く相手（前年末）が無いので、
-                その年で<b>最初に記録した月を起点</b>にしています（それより前に出ていた損益は分からないので含めません）。
-                その年の記録が1ヶ月しか無いと増減が測れないので表示しません。
-                年の途中までしか記録が無い年は、横軸に「(Nヶ月)」と月数を添えています。
+                資産タブに入れている「評価損益」は<b>その月の増減</b>（値動き）です。
+                積み上がった累計ではないので、プラスとマイナスが行き来します。
+                <br /><b>月単位</b>はその月の値をそのまま、<b>年単位はその年の合計</b>を出します
+                （例: 1月 +84,432 / 2月 − 55,787 … を全部足した額）。
+                <br />記録が無い月は「0」ではなく「不明」として<b>合計に入れません</b>。
+                何ヶ月ぶんの合計かは、横軸の「(Nヶ月)」で分かります（12ヶ月そろっていれば年のだけ）。
+                <br />積立などの入金を含む「今月の投資増減」とは別の数字で、こちらは<b>値動きだけ</b>です。
               </HelpTip>
             </h2>
             <div className="chart-box small">
-              {unit === 'year' ? (
-                <Bar
-                  data={{
-                    labels: profitSeries.map((b) => bucketLabel(b.bucket, unit, b.monthCount)),
-                    datasets: [{ label: 'その年の増加分', data: profitSeries.map((b) => b.gain), backgroundColor: profitSeries.map((b) => ((b.gain ?? 0) >= 0 ? '#4ade80' : '#f87171')) }],
-                  }}
-                  options={{
-                    maintainAspectRatio: false,
-                    scales: monthYenScales,
-                    plugins: {
-                      legend: { display: false },
-                      // 起点が前年末ではない年は、一年分の増加とは限らないので断っておく
-                      tooltip: {
-                        callbacks: {
-                          afterBody: (items: Array<{ dataIndex: number }>) =>
-                            items.length && profitSeries[items[0].dataIndex]?.partial
-                              ? '※ 評価損益の記録が始まった年なので、最初の記録からの増加分'
-                              : '',
-                        },
-                      },
-                    },
-                  }}
-                />
-              ) : (
-                <Line
-                  data={{
-                    labels: profitSeries.map((b) => bucketLabel(b.bucket, unit, b.monthCount)),
-                    datasets: [{ label: '評価損益', data: profitSeries.map((b) => b.cumulative), borderColor: '#4ade80', backgroundColor: 'rgba(74,222,128,0.15)', fill: true, tension: 0.3 }],
-                  }}
-                  options={{
-                    maintainAspectRatio: false,
-                    spanGaps: true,
-                    plugins: {
-                      legend: { display: false },
-                      tooltip: { callbacks: { afterBody: carriedNote(profitSeries.map((b) => b.bucket)) } },
-                    },
-                    scales: monthYenScales,
-                  }}
-                />
-              )}
+              <Bar
+                data={{
+                  labels: profitSeries.map((b) => bucketLabel(b.bucket, unit, b.monthCount)),
+                  datasets: [{
+                    label: unit === 'year' ? '評価損益（年合計）' : 'その月の評価損益',
+                    data: profitSeries.map((b) => b.total),
+                    backgroundColor: profitSeries.map((b) => ((b.total ?? 0) >= 0 ? '#4ade80' : '#f87171')),
+                  }],
+                }}
+                options={{ maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: monthYenScales }}
+              />
             </div>
           </div>
         )}

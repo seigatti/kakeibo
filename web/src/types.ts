@@ -3,7 +3,8 @@ export interface AssetRow {
   investment: number | null
   cash: number | null
   pension: number | null
-  mf_profit: number | null // マネフォの評価損益（累計）
+  /** **その月の評価損益（値動きの増減）**。累計ではないので、年にまとめるときは合計する */
+  mf_profit: number | null
   memo: string | null
   monthly_gain: number | null // マネフォ「今月の増減」（投資系資産の前月比・フロー値）
 }

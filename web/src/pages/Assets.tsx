@@ -157,7 +157,7 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
         <div className="row2">
           <label className="field">年金
             <input type="text" inputMode="numeric" placeholder="任意" value={pension} onChange={(e) => setPension(e.target.value)} /></label>
-          <label className="field">評価損益（投資利益・累計）
+          <label className="field">評価損益（その月の増減）
             <input type="text" inputMode="numeric" placeholder="任意" value={profit} onChange={(e) => setProfit(e.target.value)} /></label>
         </div>
         <label className="field">
@@ -197,18 +197,15 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
 
       {profits.length >= 2 && (
         <div className="card">
-          <h2>投資利益（評価損益）の推移</h2>
+          <h2>評価損益（その月の増減）の推移</h2>
           <div className="chart-box small">
-            <Line
+            <Bar
               data={{
                 labels: profits.map((a) => a.date.slice(2, 10)),
                 datasets: [{
-                  label: '評価損益',
+                  label: 'その月の評価損益',
                   data: profits.map((a) => a.mf_profit),
-                  borderColor: '#4ade80',
-                  backgroundColor: 'rgba(74, 222, 128, 0.15)',
-                  fill: true,
-                  tension: 0.3,
+                  backgroundColor: profits.map((a) => ((a.mf_profit ?? 0) >= 0 ? '#4ade80' : '#f87171')),
                 }],
               }}
               options={{ ...lineOpts, plugins: { legend: { display: false } } }}

@@ -271,7 +271,12 @@ export interface MonthEndSnapshot {
   invest: number | null
   cash: number | null
   pension: number | null
-  profit: number | null // その月のバケット内に記録があった場合のみ（鮮度必須）
+  /**
+   * **その月の評価損益（増減）**。累計ではなくフロー値なので、
+   * 年にまとめるときは合計する（差分を取らない）し、記録が無い月へ引き継いでもいけない。
+   * その月のバケット内に記録があった場合のみ値が入る（鮮度必須）。
+   */
+  profit: number | null
   total: number
   /** このバケットに最後に寄与した記録の日付（YYYY-MM-DD）。引き継ぎ可否の判定に使う */
   date: string
@@ -366,26 +371,14 @@ export function assetSnapshotFilled(
   const out = new Map<string, MonthEndSnapshot>()
   // 直前の実績月の値。引き継げない記録だったときは null にして穴を残す
   let carry: MonthEndSnapshot | null = null
-  // 直近の評価損益。記録のある月でも損益だけ欠けることがある（Zaim側だけ記録した月など）
-  let lastProfit: { value: number; date: string; bucket: string } | null = null
   for (const m of months) {
     const real = snap.get(m)
     if (real) {
-      const useLast = real.profit === null && lastProfit !== null
-      const filled: MonthEndSnapshot = useLast
-        ? { ...real, profit: lastProfit!.value, profitDate: lastProfit!.date }
-        : real
-      out.set(m, filled)
-      if (real.profit !== null && real.profitDate !== null) {
-        lastProfit = { value: real.profit, date: real.profitDate, bucket: m }
-      }
-      // 月末から離れた記録は翌月の実態として使えないので、そこで引き継ぎを打ち切る
-      if (carryEligible(m, real.date)) {
-        carry = { ...filled, carried: true }
-      } else {
-        carry = null
-        lastProfit = null
-      }
+      out.set(m, real)
+      // 月末から離れた記録は翌月の実態として使えないので、そこで引き継ぎを打ち切る。
+      // 評価損益だけは引き継がない（フロー値なので繰り返すと年合計で二重計上になる）。
+      // 記録が無い月は「0」ではなく「不明」として合計から外す。
+      carry = carryEligible(m, real.date) ? { ...real, profit: null, profitDate: null, carried: true } : null
       continue
     }
     if (carry && m <= currentMonth) out.set(m, carry)
@@ -396,8 +389,8 @@ export function assetSnapshotFilled(
 export interface NonInvestBreakdown {
   dCash: number
   dInvest: number
-  dProfit: number
-  dPrincipal: number // Δ投資元本 = Δ投資 − Δ評価損益（積立入金や売却の純額）
+  dProfit: number // その月の評価損益（値動き）。mf_profit はフロー値なので差分を取らない
+  dPrincipal: number // Δ投資元本 = Δ投資 − その月の評価損益（積立入金や売却の純額）
   dPension: number | null
   tradeExcluded: boolean // 売買発生とみなしΔ元本を delta から除外した月
   delta: number // 非投資の資産増減 = Δ現金 + Δ投資元本（売買除外月は Δ現金のみ）
@@ -408,23 +401,26 @@ export const DEFAULT_PRINCIPAL_CAP = 200_000
 
 /**
  * 非投資の資産増減の内訳（月別）。
- * - 非投資増減 = Δ現金 + Δ投資元本（投資元本 = 投資評価額 − 評価損益）
+ * - 非投資増減 = Δ現金 + Δ投資元本（Δ投資元本 = Δ投資 − その月の評価損益）
  * - 年金は値動きが評価損益に含まれず、拠出も給与天引き（手取り外）のため計算から除外
  * - Δ投資元本 < −principalCap（売却方向）の月は売買（や損益リセット・記録ずれ）とみなし、
  *   Δ元本を除外して Δ現金のみで算出。プラス方向（積立・買付）は現金と相殺されるため
  *   金額の大小に関わらず除外しない（除外すると積立が支出に化けるため）
- * - 当月末・前月末の両方に現金・投資の記録があり、両方の月に評価損益の記録がある月のみ算出
+ * - 当月末・前月末の両方に現金・投資の記録があり、**当月**に評価損益の記録がある月のみ算出
+ *   （mf_profit はその月の増減なので、前月の値は不要）
  */
 export function nonInvestBreakdownByMonth(assets: AssetRow[], principalCap: number = DEFAULT_PRINCIPAL_CAP): Map<string, NonInvestBreakdown> {
   const snap = assetSnapshotByMonthEnd(assets)
   const out = new Map<string, NonInvestBreakdown>()
   for (const [m, cur] of snap) {
     const prev = snap.get(addMonths(m, -1))
-    if (!prev || cur.profit === null || prev.profit === null) continue
+    if (!prev || cur.profit === null) continue
     if (cur.cash === null || prev.cash === null || cur.invest === null || prev.invest === null) continue
     const dCash = cur.cash - prev.cash
     const dInvest = cur.invest - prev.invest
-    const dProfit = cur.profit - prev.profit
+    // mf_profit は「その月の評価損益」なので、値動きはこの値そのもの。
+    // 以前は累計と見なして cur - prev を取っており、前月の損益ぶんだけずれていた
+    const dProfit = cur.profit
     const dPrincipal = dInvest - dProfit
     const tradeExcluded = dPrincipal < -principalCap
     out.set(m, {
@@ -1099,25 +1095,17 @@ export function bucketInRange(bucket: string, unit: Unit, from: string, to: stri
 export interface ProfitBucket {
   /** 区切りのキー（'YYYY-MM' または 'YYYY'） */
   bucket: string
-  /** その区切りで最後に値がある月の累計評価損益 */
-  cumulative: number | null
-  /** その区切りで増えた評価損益 =（この区切りの累計）−（ひとつ前の区切りの累計）。起点が無ければ null */
-  gain: number | null
+  /** その区切りの評価損益の合計（月単位ならその月の値そのもの）。記録が1つも無ければ null */
+  total: number | null
   /** その区切りで値があった月数（横軸ラベルの「(Nヶ月)」に使う） */
   monthCount: number
-  /**
-   * gain の起点が「ひとつ前の区切り」ではなく「この区切り自身の最初の値」か。
-   * 記録が始まった最初の年に立つ。12ヶ月そろっていても一年分の増加とは限らないので、
-   * 表示側で注記を出すために使う。
-   */
-  partial: boolean
 }
 
 /**
  * 評価損益を区切りごとにまとめる。
- * 月単位は「その月末の累計」、年単位は「その年に増えた分」を見たいので両方返す。
- * gain は months の中でしか遡らないので、**実績の最古月から渡すこと**
- * （表示期間の先頭年でも前年末の値を引けるようにするため）。
+ * mf_profit は**その月の増減**（累計ではない）なので、区切りの値は**合計**で出す。
+ * 月単位は1区切り=1ヶ月なのでその月の値そのもの、年単位はその年の合計になる。
+ * 記録が無い月は「0」ではなく「不明」として合計から外す（何ヶ月ぶんかは monthCount で分かる）。
  */
 export function profitBuckets(
   assets: AssetRow[],
@@ -1127,31 +1115,7 @@ export function profitBuckets(
 ): ProfitBucket[] {
   const snap = assetSnapshotFilled(assets, months, currentMonth)
   const valueOf = (m: string) => snap.get(m)?.profit ?? null
-  const buckets = bucketsOf(months, unit)
-  const groups = groupMonths(months, unit)
-  const cum = lastByBucket(months, unit, valueOf)
-  const counts = groups.map((ms) => ms.filter((m) => valueOf(m) !== null).length)
-  let prev: number | null = null
-  return buckets.map((bucket, i) => {
-    const cumulative = cum[i]
-    // ひとつ前の区切りに値が無い＝評価損益の記録が始まった最初の年。
-    // 引く相手が無いまま非表示にするとその年が丸ごと消えてしまうので、
-    // 「その区切りの中で最初に値がある月」を起点にして、記録がある範囲での増加分を出す。
-    // 値のある月が1つだけの区切りは増減が測れない（必ず0になる）ので起点を作らない。
-    const fallback = counts[i] >= 2 ? firstValueOf(groups[i], valueOf) : null
-    const base = prev !== null ? prev : fallback
-    const partial = prev === null && base !== null
-    const gain = cumulative !== null && base !== null ? cumulative - base : null
-    if (cumulative !== null) prev = cumulative
-    return { bucket, cumulative, gain, monthCount: counts[i], partial }
-  })
-}
-
-/** その月の並びで最初に値がある月の値。無ければ null */
-function firstValueOf(months: string[], valueOf: (m: string) => number | null): number | null {
-  for (const m of months) {
-    const v = valueOf(m)
-    if (v !== null && v !== undefined && Number.isFinite(v)) return v
-  }
-  return null
+  const totals = sumByBucket(months, unit, valueOf)
+  const counts = groupMonths(months, unit).map((ms) => ms.filter((m) => valueOf(m) !== null).length)
+  return bucketsOf(months, unit).map((bucket, i) => ({ bucket, total: totals[i], monthCount: counts[i] }))
 }

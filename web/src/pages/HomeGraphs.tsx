@@ -28,6 +28,7 @@ import {
   bucketsOf,
   isMasked,
   lastByBucket,
+  investmentPlanOf,
   monthlyGainOf,
   netWorthOver,
   sumByBucket,
@@ -134,7 +135,8 @@ export default function HomeGraphs({ data }: { data: AllData }) {
   )
   const incMap = useMemo(() => effectiveIncomeByMonth(data.furusato_salaries ?? []), [data])
   const expMap = useMemo(() => expenseByMonth(data.expenses), [data])
-  const breakdown = useMemo(() => nonInvestBreakdownByMonth(data.assets, principalCap), [data, principalCap])
+  const plan = useMemo(() => investmentPlanOf(data), [data])
+  const breakdown = useMemo(() => nonInvestBreakdownByMonth(data.assets, principalCap, plan), [data, principalCap, plan])
   // グラフ用: 収入も変動費も記録が無い月は前後から落とす（全期間で空白が続かないように）
   const cfChartMonths = useMemo(
     () => trimEmptyMonths(chartMonths, (m) => expMap.has(m) || incMap.has(m)),

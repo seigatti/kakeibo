@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import Collapsible from '../components/Collapsible'
+import PickList from '../components/PickList'
 import { useStore } from '../store'
 import type { FixedCostRow, Frequency } from '../types'
 import { fixedMonthlyTotal, monthlyShare, thisMonth, yen } from '../utils'
@@ -9,6 +11,8 @@ export default function FixedCosts() {
   const { data, mutate, saving } = useStore()
   const [form, setForm] = useState(EMPTY)
   const [editing, setEditing] = useState(false)
+  // 入力欄は既定で畳んでおく。一覧の行を押したときに開く
+  const [formOpen, setFormOpen] = useState(false)
 
   if (!data) return null
   const costs = data.fixed_costs
@@ -25,7 +29,7 @@ export default function FixedCosts() {
       memo: fc.memo ?? '',
     })
     setEditing(true)
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+    setFormOpen(true)
   }
 
   const save = async () => {
@@ -43,6 +47,7 @@ export default function FixedCosts() {
     })
     setForm(EMPTY)
     setEditing(false)
+    setFormOpen(false)
   }
 
   const remove = async (fc: FixedCostRow) => {
@@ -53,7 +58,13 @@ export default function FixedCosts() {
   return (
     <>
       <div className="card">
-        <h2>{editing ? '固定費を編集' : '固定費を追加'}</h2>
+        <h2>固定費</h2>
+        <Collapsible
+          title={editing ? `固定費を編集: ${form.name || '（無題）'}` : '固定費を追加'}
+          hint={`月割り合計 ${yen(fixedMonthlyTotal(costs, month))}/月`}
+          open={formOpen}
+          onToggle={setFormOpen}
+        >
         <div className="row2">
           <label className="field">名前
             <input type="text" placeholder="例: 火災保険" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
@@ -78,32 +89,39 @@ export default function FixedCosts() {
         </div>
         <button className="btn" onClick={() => void save()} disabled={saving}>{saving ? '保存中…' : editing ? '更新' : '追加'}</button>
         {editing && (
-          <button className="btn secondary" style={{ marginTop: 8 }} onClick={() => { setForm(EMPTY); setEditing(false) }}>キャンセル</button>
+          <button className="btn secondary" style={{ marginTop: 8 }} onClick={() => { setForm(EMPTY); setEditing(false); setFormOpen(false) }}>キャンセル</button>
         )}
+        </Collapsible>
       </div>
 
       <div className="card">
-        <h2>現在の月割り合計: {yen(fixedMonthlyTotal(costs, month))} / 月</h2>
-        <ul className="list">
-          {costs.map((fc) => {
-            const active = monthlyShare(fc, month) > 0
-            return (
-              <li key={fc.id} style={active ? undefined : { opacity: 0.45 }}>
-                <span style={{ flex: 1 }}>
-                  {fc.name}
-                  <span className="muted" style={{ fontSize: 12 }}>
-                    {' '}
-                    {yen(fc.amount)}/{fc.frequency}
-                    {fc.end_month ? `（〜${fc.end_month}）` : ''}
-                  </span>
-                </span>
-                <span>{yen(monthlyShare(fc))}/月</span>
-                <button className="btn small secondary" onClick={() => edit(fc)}>編集</button>
-                <button className="btn danger small" onClick={() => void remove(fc)}>削除</button>
-              </li>
-            )
-          })}
-        </ul>
+        <h2>現在の月割り合計: {yen(fixedMonthlyTotal(costs, month))} / 月（全{costs.length}件）</h2>
+        <PickList
+          storageKey="kakeibo.listLimit.fixedCosts"
+          rows={costs}
+          keyOf={(fc) => fc.id}
+          selected={editing ? form.id : null}
+          onPick={edit}
+          renderMain={(fc) => (
+            <>
+              <span style={{ flex: 1, opacity: monthlyShare(fc, month) > 0 ? 1 : 0.45 }}>{fc.name}</span>
+              <span style={{ opacity: monthlyShare(fc, month) > 0 ? 1 : 0.45 }}>{yen(monthlyShare(fc))}/月</span>
+            </>
+          )}
+          renderSub={(fc) => (
+            <>
+              {yen(fc.amount)} / {fc.frequency === '月' ? '毎月' : fc.frequency === '年' ? '毎年' : '2年ごと'}
+              {fc.start_month || fc.end_month ? ` ・ ${fc.start_month || '開始未設定'}〜${fc.end_month || ''}` : ''}
+              {monthlyShare(fc, month) > 0 ? '' : ' ・ 今月は対象外'}
+              {fc.memo ? ` ・ ${fc.memo}` : ''}
+            </>
+          )}
+          actions={(fc) => <button className="btn danger small" onClick={() => void remove(fc)}>削除</button>}
+          empty="固定費の登録はありません"
+        />
+        <p className="muted" style={{ fontSize: 12, margin: '8px 0 0' }}>
+          行をタップすると上の入力欄に読み込んで編集できます。
+        </p>
       </div>
     </>
   )

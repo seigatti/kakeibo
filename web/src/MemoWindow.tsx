@@ -33,6 +33,9 @@ function clamp(p: Pos): Pos {
   }
 }
 
+/** メモの表示件数。0 = 全件 */
+const MEMO_LIMITS: Array<[number, string]> = [[3, '3件'], [10, '10件'], [0, '全件']]
+
 export default function MemoWindow({ onClose }: { onClose: () => void }) {
   const { data, mutate, saving } = useStore()
   const [pos, setPos] = useState<Pos>(loadPos)
@@ -40,7 +43,15 @@ export default function MemoWindow({ onClose }: { onClose: () => void }) {
   const [edits, setEdits] = useState<Record<string, string>>({})
   const dragRef = useRef<{ dx: number; dy: number } | null>(null)
 
-  const memos = [...(data?.memos ?? [])].sort((a, b) => (b.updated_at ?? '').localeCompare(a.updated_at ?? ''))
+  const allMemos = [...(data?.memos ?? [])].sort((a, b) => (b.updated_at ?? '').localeCompare(a.updated_at ?? ''))
+  // 既定は直近3件だけ。増やしたいときだけ広げる（選択は端末に覚えさせる）
+  const [memoLimit, setMemoLimit] = useState<number>(() => {
+    const raw = localStorage.getItem('kakeibo.listLimit.memos')
+    if (raw === null) return 3
+    const n = Number(raw)
+    return MEMO_LIMITS.some(([v]) => v === n) ? n : 3
+  })
+  const memos = memoLimit > 0 ? allMemos.slice(0, memoLimit) : allMemos
 
   // 画面リサイズ時にはみ出しを補正
   useEffect(() => {
@@ -106,7 +117,15 @@ export default function MemoWindow({ onClose }: { onClose: () => void }) {
           <textarea rows={2} placeholder="新しいメモ…" value={newText} onChange={(e) => setNewText(e.target.value)} />
           <button className="btn small" style={{ width: 'auto' }} disabled={saving || !newText.trim()} onClick={() => void add()}>追加</button>
         </div>
-        {memos.length === 0 && <p className="muted" style={{ fontSize: 12, textAlign: 'center' }}>メモはまだありません</p>}
+        {allMemos.length === 0 && <p className="muted" style={{ fontSize: 12, textAlign: 'center' }}>メモはまだありません</p>}
+        {allMemos.length > MEMO_LIMITS[0][0] && (
+          <div className="seg" style={{ marginBottom: 6 }}>
+            {MEMO_LIMITS.map(([v, label]) => (
+              <button key={v} className={memoLimit === v ? 'on' : ''}
+                onClick={() => { setMemoLimit(v); localStorage.setItem('kakeibo.listLimit.memos', String(v)) }}>{label}</button>
+            ))}
+          </div>
+        )}
         {memos.map((m) => {
           const edited = edits[m.id] !== undefined && edits[m.id] !== m.text
           return (

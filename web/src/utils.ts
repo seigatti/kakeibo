@@ -398,11 +398,56 @@ export function assetSnapshotFilled(
 export interface NonInvestBreakdown {
   dCash: number
   dInvest: number
-  dProfit: number // その月の評価損益（値動き）。mf_profit はフロー値なので差分を取らない
-  dPrincipal: number // Δ投資元本 = Δ投資 − その月の評価損益（積立入金や売却の純額）
+  dProfit: number | null // その月の投資増減（値動き）。フロー値なので差分を取らない
+  dPrincipal: number // Δ投資元本（現金から投資へ回した額）。積立額の設定があればその額
+  /** 積立額の設定を採用した月はその額。資産の差から逆算した月は null */
+  plannedPrincipal: number | null
+  /** 逆算値（Δ投資 − その月の投資増減）。設定との差を見せるために常に持つ */
+  actualPrincipal: number | null
   dPension: number | null
   tradeExcluded: boolean // 売買発生とみなしΔ元本を delta から除外した月
   delta: number // 非投資の資産増減 = Δ現金 + Δ投資元本（売買除外月は Δ現金のみ）
+}
+
+/** 現金から投資へ回している毎月の額。from の月から次の行の手前まで適用される */
+export interface InvestmentPlanRow {
+  from: string // 'YYYY-MM'
+  amount: number
+}
+
+const MONTH_RE = /^[0-9]{4}-[0-9]{2}$/
+
+/** settings の investment_plan(JSON) を読む。壊れていても例外を投げず空を返す */
+export function parseInvestmentPlan(json: string | null | undefined): InvestmentPlanRow[] {
+  if (!json) return []
+  try {
+    const v = JSON.parse(json)
+    if (!Array.isArray(v)) return []
+    return v
+      .filter((r) => r && typeof r.from === 'string' && MONTH_RE.test(r.from) && Number.isFinite(Number(r.amount)))
+      .map((r) => ({ from: r.from as string, amount: Number(r.amount) }))
+      .sort((a, b) => a.from.localeCompare(b.from))
+  } catch {
+    return []
+  }
+}
+
+/** 設定を取り出す（data.settings から） */
+export function investmentPlanOf(data: Pick<AllData, 'settings'>): InvestmentPlanRow[] {
+  return parseInvestmentPlan(data.settings.find((s) => s.key === 'investment_plan')?.value)
+}
+
+/**
+ * その月に適用される積立額。最初の行より前の月は null
+ * （null の月は今までどおり資産の差から逆算する）。
+ */
+export function monthlyContributionAt(plan: InvestmentPlanRow[], month: string): number | null {
+  let hit: number | null = null
+  for (const r of plan) {
+    if (r.from <= month) hit = r.amount
+    else break
+  }
+  return hit
 }
 
 /** 売買判定しきい値の既定値: Δ投資元本がこれを超えてマイナス（売却方向）の月は売買発生とみなす */
@@ -418,25 +463,37 @@ export const DEFAULT_PRINCIPAL_CAP = 200_000
  * - 当月末・前月末の両方に現金・投資の記録があり、**当月**に評価損益の記録がある月のみ算出
  *   （mf_profit はその月の増減なので、前月の値は不要）
  */
-export function nonInvestBreakdownByMonth(assets: AssetRow[], principalCap: number = DEFAULT_PRINCIPAL_CAP): Map<string, NonInvestBreakdown> {
+export function nonInvestBreakdownByMonth(
+  assets: AssetRow[],
+  principalCap: number = DEFAULT_PRINCIPAL_CAP,
+  plan: InvestmentPlanRow[] = [],
+): Map<string, NonInvestBreakdown> {
   const snap = assetSnapshotByMonthEnd(assets)
   const out = new Map<string, NonInvestBreakdown>()
   for (const [m, cur] of snap) {
     const prev = snap.get(addMonths(m, -1))
-    if (!prev || cur.profit === null) continue
+    if (!prev) continue
     if (cur.cash === null || prev.cash === null || cur.invest === null || prev.invest === null) continue
+    const planned = monthlyContributionAt(plan, m)
+    // 積立額の設定を使う月は、投資増減の記録が無くても算出できる
+    if (planned === null && cur.profit === null) continue
     const dCash = cur.cash - prev.cash
     const dInvest = cur.invest - prev.invest
-    // mf_profit は「その月の評価損益」なので、値動きはこの値そのもの。
-    // 以前は累計と見なして cur - prev を取っており、前月の損益ぶんだけずれていた
+    // 「今月の投資増減」はフロー値なので、値動きはこの値そのもの
     const dProfit = cur.profit
-    const dPrincipal = dInvest - dProfit
-    const tradeExcluded = dPrincipal < -principalCap
+    const actualPrincipal = dProfit === null ? null : dInvest - dProfit
+    // 逆算（Δ投資 − 値動き）は記録日のずれで月ごとのブレが大きく、そのまま
+    // 「その他支出」の誤差になる。積立額の設定があればそちらを正とする
+    const dPrincipal = planned !== null ? planned : (actualPrincipal as number)
+    // 設定額は一定の積立なので売却と誤認しようがない（売買判定をしない）
+    const tradeExcluded = planned === null && dPrincipal < -principalCap
     out.set(m, {
       dCash,
       dInvest,
       dProfit,
       dPrincipal,
+      plannedPrincipal: planned,
+      actualPrincipal,
       dPension: cur.pension !== null && prev.pension !== null ? cur.pension - prev.pension : null,
       tradeExcluded,
       delta: tradeExcluded ? dCash : dCash + dPrincipal,
@@ -446,8 +503,8 @@ export function nonInvestBreakdownByMonth(assets: AssetRow[], principalCap: numb
 }
 
 /** 非投資の資産増減(月) = Δ現金 + Δ投資元本（詳細は nonInvestBreakdownByMonth 参照） */
-export function nonInvestDeltaByMonth(assets: AssetRow[], principalCap: number = DEFAULT_PRINCIPAL_CAP): Map<string, number> {
-  return new Map([...nonInvestBreakdownByMonth(assets, principalCap)].map(([m, b]) => [m, b.delta]))
+export function nonInvestDeltaByMonth(assets: AssetRow[], principalCap: number = DEFAULT_PRINCIPAL_CAP, plan: InvestmentPlanRow[] = []): Map<string, number> {
+  return new Map([...nonInvestBreakdownByMonth(assets, principalCap, plan)].map(([m, b]) => [m, b.delta]))
 }
 
 /**
@@ -521,13 +578,13 @@ export function categoryStats(expenses: ExpenseRow[], months: string[]): Categor
 
 /** 月ごとの貯蓄率(%) = (収入 − 支出) ÷ 収入 × 100。支出=固定+変動+その他支出。収入0の月は除外 */
 export function savingsRateByMonth(
-  data: Pick<AllData, 'income' | 'expenses' | 'fixed_costs' | 'assets'> & { furusato_salaries?: AllData['furusato_salaries'] },
+  data: Pick<AllData, 'income' | 'expenses' | 'fixed_costs' | 'assets' | 'settings'> & { furusato_salaries?: AllData['furusato_salaries'] },
   months: string[],
   principalCap: number = DEFAULT_PRINCIPAL_CAP,
 ): Array<{ month: string; rate: number }> {
   const incMap = effectiveIncomeByMonth(data.furusato_salaries ?? [])
   const expMap = expenseByMonth(data.expenses)
-  const breakdown = nonInvestBreakdownByMonth(data.assets, principalCap)
+  const breakdown = nonInvestBreakdownByMonth(data.assets, principalCap, investmentPlanOf(data))
   const out: Array<{ month: string; rate: number }> = []
   for (const m of months) {
     const income = incMap.get(m) ?? 0
@@ -542,7 +599,7 @@ export function savingsRateByMonth(
 
 /** 期間の支出内訳（固定費計 + 変動費カテゴリ別 + その他支出計）。ドーナツ用・降順 */
 export function expenseComposition(
-  data: Pick<AllData, 'income' | 'expenses' | 'fixed_costs' | 'assets'> & { furusato_salaries?: AllData['furusato_salaries'] },
+  data: Pick<AllData, 'income' | 'expenses' | 'fixed_costs' | 'assets' | 'settings'> & { furusato_salaries?: AllData['furusato_salaries'] },
   months: string[],
   principalCap: number = DEFAULT_PRINCIPAL_CAP,
 ): Array<{ label: string; value: number }> {
@@ -552,7 +609,7 @@ export function expenseComposition(
   for (const s of categoryStats(data.expenses, months)) items.push({ label: s.category, value: s.total })
   const incMap = effectiveIncomeByMonth(data.furusato_salaries ?? [])
   const expMap = expenseByMonth(data.expenses)
-  const breakdown = nonInvestBreakdownByMonth(data.assets, principalCap)
+  const breakdown = nonInvestBreakdownByMonth(data.assets, principalCap, investmentPlanOf(data))
   let other = 0
   for (const m of months) {
     const o = estimateOtherExpense(incMap.get(m) ?? 0, fixedMonthlyTotal(data.fixed_costs, m), expMap.get(m) ?? 0, breakdown.get(m)?.delta)
@@ -629,7 +686,7 @@ export function assetAllocationTrend(
  * ※プラン側で子供費用を別途加算するため、二重計上にならないよう差し引く
  */
 export function estimateLivingCost(
-  data: Pick<AllData, 'income' | 'expenses' | 'fixed_costs' | 'assets'> & { furusato_salaries?: AllData['furusato_salaries'] },
+  data: Pick<AllData, 'income' | 'expenses' | 'fixed_costs' | 'assets' | 'settings'> & { furusato_salaries?: AllData['furusato_salaries'] },
   currentChildCostAnnual: number,
   months = 12,
   principalCap: number = DEFAULT_PRINCIPAL_CAP,
@@ -638,7 +695,7 @@ export function estimateLivingCost(
   const from = addMonths(to, -(months - 1))
   const incMap = effectiveIncomeByMonth(data.furusato_salaries ?? [])
   const expMap = expenseByMonth(data.expenses)
-  const breakdown = nonInvestBreakdownByMonth(data.assets, principalCap)
+  const breakdown = nonInvestBreakdownByMonth(data.assets, principalCap, investmentPlanOf(data))
 
   // 実績として意味のある月＝変動費の記録がある月、またはその他支出を算出できた月
   // （固定費は毎月あるため判定に使うと、記録の無い月まで平均に含めて過小評価になる）
@@ -664,7 +721,7 @@ export function estimateLivingCost(
 }
 
 export function periodSummary(
-  data: Pick<AllData, 'income' | 'expenses' | 'fixed_costs' | 'assets'> & { furusato_salaries?: AllData['furusato_salaries'] },
+  data: Pick<AllData, 'income' | 'expenses' | 'fixed_costs' | 'assets' | 'settings'> & { furusato_salaries?: AllData['furusato_salaries'] },
   from: string,
   to: string,
   principalCap: number = DEFAULT_PRINCIPAL_CAP,
@@ -672,7 +729,7 @@ export function periodSummary(
   const months = from <= to ? monthRange(from, to) : []
   const incMap = effectiveIncomeByMonth(data.furusato_salaries ?? [])
   const expMap = expenseByMonth(data.expenses)
-  const breakdown = nonInvestBreakdownByMonth(data.assets, principalCap)
+  const breakdown = nonInvestBreakdownByMonth(data.assets, principalCap, investmentPlanOf(data))
 
   let income = 0
   let fixed = 0

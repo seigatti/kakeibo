@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Collapsible from '../components/Collapsible'
 import HelpTip from '../components/HelpTip'
+import PickList from '../components/PickList'
 import { useStore } from '../store'
 import { LIABILITY_KINDS, type LiabilityKind, type LiabilityRow } from '../types'
 import { annualLoanPayment, liabilityBalanceAt, thisMonth, yen } from '../utils'
@@ -86,28 +87,6 @@ export default function LiabilityCard() {
         </HelpTip>
       </h2>
 
-      <ul className="list">
-        {liabilities.map((l) => (
-          <li key={l.id} style={{ flexWrap: 'wrap' }}>
-            <span style={{ flex: '1 1 100%', fontSize: 13 }}>
-              {l.name}
-              <span className="muted" style={{ fontSize: 11 }}>
-                {' '}{l.kind}
-                {l.kind === 'ローン' && l.principal ? ` ・当初${yen(l.principal)}・${l.rate ?? 0}%・${l.years ?? 0}年` : ''}
-              </span>
-            </span>
-            <span style={{ flex: 1 }}>{yen(liabilityBalanceAt(l, month))}</span>
-            {l.kind === 'ローン' && l.principal && l.years ? (
-              <span className="muted" style={{ fontSize: 11 }}>
-                返済 {yen(annualLoanPayment(l.principal, l.rate ?? 0, l.years) / 12)}/月
-              </span>
-            ) : null}
-            <button className="btn small secondary" onClick={() => edit(l)}>編集</button>
-            <button className="btn danger small" onClick={() => void remove(l)}>削除</button>
-          </li>
-        ))}
-        {liabilities.length === 0 && <li className="muted">負債の登録はありません</li>}
-      </ul>
 
       <Collapsible
         title={editing ? '負債を編集' : '負債を追加'}
@@ -153,6 +132,36 @@ export default function LiabilityCard() {
         <button className="btn secondary" style={{ marginTop: 8 }} onClick={() => { setForm(EMPTY); setEditing(false); setFormOpen(false) }}>キャンセル</button>
       )}
       </Collapsible>
+
+      <PickList
+        storageKey="kakeibo.listLimit.liabilities"
+        rows={liabilities}
+        keyOf={(l) => l.id}
+        selected={editing ? form.id : null}
+        onPick={edit}
+        renderMain={(l) => (
+          <>
+            <span style={{ flex: 1 }}>{l.name}</span>
+            <span>{yen(liabilityBalanceAt(l, month))}</span>
+          </>
+        )}
+        renderSub={(l) => (
+          <>
+            {l.kind}
+            {l.kind === 'ローン' && l.principal ? ` ・ 当初${yen(l.principal)} ・ ${l.rate ?? 0}% ・ ${l.years ?? 0}年` : ''}
+            {l.kind === 'ローン' && l.principal && l.years
+              ? ` ・ 返済 ${yen(annualLoanPayment(l.principal, l.rate ?? 0, l.years) / 12)}/月`
+              : ''}
+            {l.start_month ? ` ・ ${l.start_month}〜` : ''}
+            {l.memo ? ` ・ ${l.memo}` : ''}
+          </>
+        )}
+        actions={(l) => <button className="btn danger small" onClick={() => void remove(l)}>削除</button>}
+        empty="負債の登録はありません"
+      />
+      <p className="muted" style={{ fontSize: 12, margin: '8px 0 0' }}>
+        行をタップすると上の入力欄に読み込んで編集できます。
+      </p>
       {msg && <p className="pos center" style={{ margin: '8px 0 0' }}>{msg}</p>}
     </div>
   )

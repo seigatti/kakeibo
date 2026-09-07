@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Chart, Line } from 'react-chartjs-2'
+import PickList from '../components/PickList'
 import { useStore } from '../store'
 import { CONSUMPTION_UNITS, DEFAULT_CATEGORIES } from '../types'
 import HelpTip from '../components/HelpTip'
 import Collapsible from '../components/Collapsible'
 import PeriodPicker, { usePeriod } from '../components/PeriodPicker'
 import { DEFAULT_PERSONS } from '../types'
-import { addMonths, categoryStats, dataMonthRange, DEFAULT_PRINCIPAL_CAP, effectiveIncomeByMonth, estimateOtherExpense, expenseByMonth, fixedMonthlyTotal, monthRange, netSalaryByMonth, nonInvestBreakdownByMonth, otherIncomeByMonth, thisMonth, yen, yenShort } from '../utils'
+import { addMonths, categoryStats, investmentPlanOf, dataMonthRange, DEFAULT_PRINCIPAL_CAP, effectiveIncomeByMonth, estimateOtherExpense, expenseByMonth, fixedMonthlyTotal, monthRange, netSalaryByMonth, nonInvestBreakdownByMonth, otherIncomeByMonth, thisMonth, yen, yenShort } from '../utils'
 import SalaryCard from './SalaryCard'
 
 const PALETTE = ['#38bdf8', '#4ade80', '#fbbf24', '#f87171', '#c084fc', '#fb923c', '#2dd4bf', '#a3e635']
@@ -22,6 +23,8 @@ export default function Cashflow() {
   const [newCat, setNewCat] = useState('')
   const [extraCats, setExtraCats] = useState<string[]>([])
   const [msg, setMsg] = useState('')
+  // 入力欄は既定で畳んでおく。月別の記録一覧の行を押したときに開く
+  const [formOpen, setFormOpen] = useState(false)
 
   const persons = useMemo(() => {
     const raw = data?.settings.find((s) => s.key === 'furusato_persons')?.value
@@ -118,7 +121,17 @@ export default function Cashflow() {
     return Number.isFinite(n) && n > 0 ? n : DEFAULT_PRINCIPAL_CAP
   }, [data])
   const [capInput, setCapInput] = useState<string | null>(null)
-  const breakdown = useMemo(() => nonInvestBreakdownByMonth(data?.assets ?? [], principalCap), [data, principalCap])
+  /** 記録がある月（変動費・消費量・収入のどれか）。新しい順 */
+  const recordedMonths = useMemo(() => {
+    const set = new Set<string>()
+    for (const e of data?.expenses ?? []) set.add(e.month)
+    for (const c of data?.consumption ?? []) set.add(c.month)
+    for (const m of incMap.keys()) set.add(m)
+    return [...set].sort((a, b) => b.localeCompare(a))
+  }, [data, incMap])
+
+  const plan = useMemo(() => (data ? investmentPlanOf(data) : []), [data])
+  const breakdown = useMemo(() => nonInvestBreakdownByMonth(data?.assets ?? [], principalCap, plan), [data, principalCap, plan])
   const otherOf = (m: string) =>
     estimateOtherExpense(incMap.get(m) ?? 0, fixedOf(m), expMap.get(m) ?? 0, breakdown.get(m)?.delta)
 
@@ -135,6 +148,12 @@ export default function Cashflow() {
           </HelpTip>
         </h2>
         <label className="field">対象月<input type="month" value={month} onChange={(e) => { setMonth(e.target.value); setMsg('') }} /></label>
+        <Collapsible
+          title="変動費を入力"
+          hint={`${month} ・ ${yen(expMap.get(month) ?? 0)}`}
+          open={formOpen}
+          onToggle={setFormOpen}
+        >
         {monthIsEmpty && prevExpenses.length > 0 && (
           <button className="btn secondary" style={{ marginBottom: 10 }} onClick={copyPrevMonth}>
             前月（{prevMonth}）の変動費をコピー
@@ -159,12 +178,51 @@ export default function Cashflow() {
             <input type="text" placeholder="例: 食費" value={newCat} onChange={(e) => setNewCat(e.target.value)} /></label>
           <button className="btn secondary" onClick={() => { if (newCat.trim()) { setExtraCats([...extraCats, newCat.trim()]); setNewCat('') } }}>追加</button>
         </div>
+        </Collapsible>
         <button className="btn" onClick={() => void save()} disabled={saving}>{saving ? '保存中…' : '保存'}</button>
         {msg && <p className="pos center" style={{ margin: '8px 0 0' }}>{msg}</p>}
         <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
           ※支出合計には固定費の月割り（{yen(fixedOf(month))}）が自動で加算されます。給料・その他収入は下の給与カードで入力します
         </p>
       </div>
+
+      {recordedMonths.length > 0 && (
+        <div className="card">
+          <h2>月別の記録（新しい順）全{recordedMonths.length}ヶ月</h2>
+          <PickList
+            storageKey="kakeibo.listLimit.cashflowMonths"
+            rows={recordedMonths}
+            keyOf={(m) => m}
+            selected={month}
+            onPick={(m) => { setMonth(m); setFormOpen(true); setMsg('') }}
+            renderMain={(m) => (
+              <>
+                <span className="muted">{m}</span>
+                <span>変動費 {yen(expMap.get(m) ?? 0)}</span>
+              </>
+            )}
+            renderSub={(m) => {
+              const cats = (data?.expenses ?? []).filter((e) => e.month === m && e.amount > 0).length
+              const qty = (data?.consumption ?? []).filter((c) => c.month === m && c.quantity > 0).length
+              const inc = incMap.get(m)
+              const other = otherOf(m)
+              return (
+                <>
+                  {cats}カテゴリ
+                  {qty > 0 ? ` ・ 消費量${qty}件` : ''}
+                  {inc ? ` ・ 収入 ${yenShort(inc)}` : ''}
+                  {` ・ 固定費 ${yenShort(fixedOf(m))}`}
+                  {other !== null ? ` ・ その他支出 ${yenShort(other)}` : ' ・ その他支出は算出できず'}
+                </>
+              )
+            }}
+            empty="まだ記録がありません"
+          />
+          <p className="muted" style={{ fontSize: 12, margin: '8px 0 0' }}>
+            行をタップするとその月の入力欄が開きます。
+          </p>
+        </div>
+      )}
 
       <SalaryCard persons={persons} />
 
@@ -240,6 +298,7 @@ export default function Cashflow() {
                       <th style={{ padding: 3, textAlign: 'right' }}>Δ投資</th>
                       <th style={{ padding: 3, textAlign: 'right' }}>今月の増減</th>
                       <th style={{ padding: 3, textAlign: 'right' }}>Δ投資元本</th>
+                      <th style={{ padding: 3, textAlign: 'right' }}>逆算との差</th>
                       <th style={{ padding: 3, textAlign: 'right' }}>収入</th>
                       <th style={{ padding: 3, textAlign: 'right' }}>固定+変動</th>
                       <th style={{ padding: 3, textAlign: 'right' }}>その他支出</th>
@@ -256,9 +315,20 @@ export default function Cashflow() {
                           <td style={{ padding: 3 }}>{m.slice(2)}</td>
                           <td style={{ padding: 3, textAlign: 'right' }}>{yenShort(b.dCash)}</td>
                           <td style={{ padding: 3, textAlign: 'right' }}>{yenShort(b.dInvest)}</td>
-                          <td style={{ padding: 3, textAlign: 'right' }}>{yenShort(b.dProfit)}</td>
+                          <td style={{ padding: 3, textAlign: 'right' }}>{b.dProfit === null ? '−' : yenShort(b.dProfit)}</td>
                           <td style={{ padding: 3, textAlign: 'right', textDecoration: b.tradeExcluded ? 'line-through' : undefined }}
-                            className={suspicious ? 'neg' : b.tradeExcluded ? 'muted' : ''}>{yenShort(b.dPrincipal)}</td>
+                            className={suspicious ? 'neg' : b.tradeExcluded ? 'muted' : ''}>
+                            {yenShort(b.dPrincipal)}
+                            {b.plannedPrincipal !== null && <span className="muted" style={{ fontSize: 10 }}> 設定</span>}
+                          </td>
+                          <td style={{ padding: 3, textAlign: 'right' }} className="muted"
+                            title={b.plannedPrincipal !== null && b.actualPrincipal !== null
+                              ? `逆算 ${b.actualPrincipal.toLocaleString('ja-JP')}円（設定との差 ${(b.actualPrincipal - b.plannedPrincipal).toLocaleString('ja-JP')}円）`
+                              : undefined}>
+                            {b.plannedPrincipal !== null && b.actualPrincipal !== null
+                              ? yenShort(b.actualPrincipal - b.plannedPrincipal)
+                              : '−'}
+                          </td>
                           <td style={{ padding: 3, textAlign: 'right' }}>{yenShort(income)}</td>
                           <td style={{ padding: 3, textAlign: 'right' }}>{yenShort(fixedOf(m) + (expMap.get(m) ?? 0))}</td>
                           <td style={{ padding: 3, textAlign: 'right' }}>{otherOf(m) !== null ? yenShort(otherOf(m)!) : '−'}</td>

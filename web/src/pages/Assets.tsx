@@ -3,19 +3,16 @@ import { Bar, Line } from 'react-chartjs-2'
 import Collapsible from '../components/Collapsible'
 import HelpTip from '../components/HelpTip'
 import Modal from '../components/Modal'
+import PickList from '../components/PickList'
 import LoanTotalsCard from '../components/LoanTotalsCard'
 import PeriodPicker, { inRange, usePeriod } from '../components/PeriodPicker'
 import { useStore } from '../store'
 import type { AssetRow } from '../types'
 import { assetTotal, monthlyGainOf, sortedAssets, thisMonth, today, yen, yenShort } from '../utils'
+import InvestmentPlanCard from './InvestmentPlanCard'
 import LiabilityCard from './LiabilityCard'
 
 const PREFILL_KEYS = ['investment', 'cash', 'pension', 'gain'] as const
-
-const HIST_LIMIT_KEY = 'kakeibo.assetHistoryLimit'
-/** 記録履歴の表示件数。0 = 全件。既定は3件（直近だけ見えればよく、必要なら増やす） */
-const HIST_LIMITS: Array<[number, string]> = [[3, '3件'], [10, '10件'], [30, '30件'], [0, '全件']]
-const DEFAULT_HIST_LIMIT = 3
 
 // 全期間表示でも横軸ラベルが潰れないように間引く
 const xTicks = { ticks: { maxTicksLimit: 12, maxRotation: 0 } }
@@ -31,14 +28,6 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
   const [msg, setMsg] = useState('')
   // 入力欄は既定で畳んでおく。記録履歴の行を押したときは開いて中身を見せる
   const [formOpen, setFormOpen] = useState(false)
-  // 記録履歴の表示件数（0=全件）。選択は端末に覚えさせる
-  const [histLimit, setHistLimit] = useState(() => {
-    // 未保存(null)を Number() に通すと 0（＝全件）になってしまうので、文字列のまま判定する
-    const raw = localStorage.getItem(HIST_LIMIT_KEY)
-    if (raw === null) return DEFAULT_HIST_LIMIT
-    const saved = Number(raw)
-    return HIST_LIMITS.some(([v]) => v === saved) ? saved : DEFAULT_HIST_LIMIT
-  })
   // 日付変更の対象（モーダル）
   const [dateEdit, setDateEdit] = useState<{ row: AssetRow; to: string } | null>(null)
   const appliedPrefill = useRef<string | null>(null)
@@ -153,11 +142,8 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
     setMsg(move ? `${row.date} を ${to} へ移動しました ✓` : `${row.date} を ${to} にコピーしました ✓`)
   }
 
-  // 記録履歴（新しい順）。0 は全件（グローバルの history と紛れないよう histRows）
-  const histRows = useMemo(() => {
-    const desc = [...assets].reverse()
-    return histLimit > 0 ? desc.slice(0, histLimit) : desc
-  }, [assets, histLimit])
+  // 記録履歴（新しい順）。グローバルの history と紛れないよう histRows
+  const histRows = useMemo(() => [...assets].reverse(), [assets])
 
   const lineOpts = {
     maintainAspectRatio: false,
@@ -216,39 +202,32 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
 
       {assets.length > 0 && (
         <div className="card">
-          <h2>記録履歴（新しい順）{histRows.length}件 / 全{assets.length}件</h2>
-          <ul className="list">
-            {histRows.map((a) => (
-              <li
-                key={a.date}
-                className={`row-pick${a.date === date ? ' on' : ''}`}
-                role="button"
-                tabIndex={0}
-                onClick={() => editRow(a)}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); editRow(a) } }}
-              >
+          <h2>記録履歴（新しい順）全{assets.length}件</h2>
+          <PickList
+            storageKey="kakeibo.assetHistoryLimit"
+            rows={histRows}
+            keyOf={(a) => a.date}
+            selected={date}
+            onPick={editRow}
+            renderMain={(a) => (
+              <>
                 <span className="muted">{a.date}</span>
                 <span>{yen(assetTotal(a))}</span>
-                {/* 行の押下で編集に入るので、ボタンは伝播を止める */}
-                <button className="btn small secondary" onClick={(e) => { e.stopPropagation(); setDateEdit({ row: a, to: a.date }) }}>日付</button>
-                <button className="btn danger small" onClick={(e) => { e.stopPropagation(); void remove(a.date) }}>削除</button>
-                <span className="muted row-sub">
-                  {breakdownOf(a).map((p, i) => (
-                    <span key={p.k}>
-                      {i > 0 && ' / '}
-                      {p.k} <span className={p.cls}>{p.k === '増減' && p.v >= 0 ? '+' : ''}{yenShort(p.v)}</span>
-                    </span>
-                  ))}
-                </span>
-              </li>
+              </>
+            )}
+            renderSub={(a) => breakdownOf(a).map((p, i) => (
+              <span key={p.k}>
+                {i > 0 && ' / '}
+                {p.k} <span className={p.cls}>{p.k === '増減' && p.v >= 0 ? '+' : ''}{yenShort(p.v)}</span>
+              </span>
             ))}
-          </ul>
-          <div className="seg" style={{ marginTop: 8, marginBottom: 0 }}>
-            {HIST_LIMITS.map(([v, label]) => (
-              <button key={v} className={histLimit === v ? 'on' : ''}
-                onClick={() => { setHistLimit(v); localStorage.setItem(HIST_LIMIT_KEY, String(v)) }}>{label}</button>
-            ))}
-          </div>
+            actions={(a) => (
+              <>
+                <button className="btn small secondary" onClick={() => setDateEdit({ row: a, to: a.date })}>日付</button>
+                <button className="btn danger small" onClick={() => void remove(a.date)}>削除</button>
+              </>
+            )}
+          />
           <p className="muted" style={{ fontSize: 12, margin: '8px 0 0' }}>
             行をタップすると上の入力欄に読み込んで編集できます。「日付」から日付だけを変えた移動・コピーができます。
           </p>
@@ -258,6 +237,8 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
       <LiabilityCard />
 
       <LoanTotalsCard liabilities={data?.liabilities ?? []} />
+
+      <InvestmentPlanCard />
 
       {/* 期間バーの sticky はこの div の中でだけ効く */}
       <div>

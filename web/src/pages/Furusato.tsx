@@ -17,6 +17,7 @@ import {
   type PickMode,
 } from '../furusato'
 import Collapsible from '../components/Collapsible'
+import PickList from '../components/PickList'
 import HelpTip from '../components/HelpTip'
 import ProfileCard from './ProfileCard'
 import FurusatoItemModal, { EMPTY_ITEM, rateTextOf, type ItemForm } from './FurusatoItemModal'
@@ -297,38 +298,44 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
   }
 
   /** @param showYear 年をまたいで並べるとき（検索結果・候補）に対象年バッジを出す */
-  const ItemList = ({ list, showYear }: { list: FurusatoItem[]; showYear?: boolean }) => (
-    <ul className="list">
-      {list.map((it) => {
+  /**
+   * 寄付・候補の一覧。行を押すと編集モーダルが開く。
+   * @param name 表示件数の記憶を一覧ごとに分けるための名前
+   */
+  const ItemList = ({ list, showYear, name }: { list: FurusatoItem[]; showYear?: boolean; name: string }) => (
+    <PickList
+      storageKey={`kakeibo.listLimit.furusato.${name}`}
+      rows={list}
+      keyOf={(it) => it.id}
+      selected={editing ? form.id : null}
+      onPick={editItem}
+      renderMain={(it) => (
+        <span style={{ flex: '1 1 100%', fontSize: 13 }}>
+          {it.name.slice(0, 45)}{it.name.length > 45 ? '…' : ''}
+          {it.url && (
+            <a href={it.url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', marginLeft: 6, fontSize: 11 }}
+              onClick={(e) => e.stopPropagation()}>開く↗</a>
+          )}
+        </span>
+      )}
+      renderSub={(it) => {
         const rate = returnRate(it)
         const received = it.receipt_status === '済'
         const y = toNum(it.year)
         return (
-          <li key={it.id} style={{ flexWrap: 'wrap' }}>
-            <span style={{ flex: '1 1 100%', fontSize: 13 }}>
-              {it.url ? (
-                <a href={it.url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>{it.name.slice(0, 45)}{it.name.length > 45 ? '…' : ''}</a>
-              ) : (
-                <>{it.name.slice(0, 45)}{it.name.length > 45 ? '…' : ''}</>
-              )}
-            </span>
-            <span style={{ flex: '1 1 100%', display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
-              {showYear && <span className="badge" style={{ color: 'var(--muted)' }}>{y ? `${y}年` : '候補'}</span>}
-              <span className="badge" style={{ color: statusColor(it.application_status) }}>{it.application_status ?? '未購入'}</span>
-              <span className="badge" style={{ color: received ? 'var(--green)' : 'var(--red)' }}>{received ? '受取済' : '受取未'}</span>
-              {rate !== null && <span className="badge" style={{ color: 'var(--accent)' }}>還元 {Math.round(rate * 1000) / 10}%</span>}
-              <span className="badge" style={{ color: 'var(--muted)' }}>優先 {priorityOf(it)}</span>
-            </span>
-            <span className="muted" style={{ fontSize: 12, flex: 1 }}>
-              {it.municipality ?? ''} {toNum(it.price) !== null ? yen(toNum(it.price)!) : ''}
-            </span>
-            <button className="btn small secondary" onClick={() => editItem(it)}>編集</button>
-            <button className="btn danger small" onClick={() => void removeItem(it)}>削除</button>
-          </li>
+          <span style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+            {showYear && <span className="badge" style={{ color: 'var(--muted)' }}>{y ? `${y}年` : '候補'}</span>}
+            <span className="badge" style={{ color: statusColor(it.application_status) }}>{it.application_status ?? '未購入'}</span>
+            <span className="badge" style={{ color: received ? 'var(--green)' : 'var(--red)' }}>{received ? '受取済' : '受取未'}</span>
+            {rate !== null && <span className="badge" style={{ color: 'var(--accent)' }}>還元 {Math.round(rate * 1000) / 10}%</span>}
+            <span className="badge" style={{ color: 'var(--muted)' }}>優先 {priorityOf(it)}</span>
+            <span>{it.municipality ?? ''} {toNum(it.price) !== null ? yen(toNum(it.price)!) : ''}</span>
+          </span>
         )
-      })}
-      {list.length === 0 && <li className="muted">なし</li>}
-    </ul>
+      }}
+      actions={(it) => <button className="btn danger small" onClick={() => void removeItem(it)}>削除</button>}
+      empty="なし"
+    />
   )
 
   return (
@@ -512,13 +519,13 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
       {searching ? (
         <div className="card">
           <h2>検索結果（{found.length}件 / 全{items.length}件）</h2>
-          <ItemList list={found} showYear />
+          <ItemList list={found} showYear name="found" />
         </div>
       ) : (
         <>
           <div className="card">
             <h2>{year}年の寄付（{yearItems.length}件）</h2>
-            <ItemList list={yearItems} />
+            <ItemList list={yearItems} name="year" />
           </div>
 
           <div className="card">
@@ -562,10 +569,10 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
                       予算の {Math.round((pick.total / Math.max(1, budget)) * 100)}% を使用・残り {yen(budget - pick.total)}
                       {averageRate(pick.chosen) !== null && `／平均還元率 ${Math.round(averageRate(pick.chosen)! * 1000) / 10}%`}
                     </p>
-                    <ItemList list={pick.chosen} showYear />
+                    <ItemList list={pick.chosen} showYear name="candidates" />
                     {pick.rest.length > 0 && (
                       <Collapsible title="今回は見送り" hint={`${pick.rest.length}件`}>
-                        <ItemList list={pick.rest} showYear />
+                        <ItemList list={pick.rest} showYear name="extra1" />
                       </Collapsible>
                     )}
                   </>
@@ -582,7 +589,7 @@ export default function Furusato({ prefill }: { prefill: URLSearchParams }) {
 
           <div className="card">
             <h2>候補・未購入（{candidates.length}件）</h2>
-            <ItemList list={candidates} showYear />
+            <ItemList list={candidates} showYear name="extra2" />
           </div>
         </>
       )}

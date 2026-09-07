@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import Collapsible from '../components/Collapsible'
 import HelpTip from '../components/HelpTip'
 import { useStore } from '../store'
 import type { BonusConfig } from '../types'
@@ -38,6 +39,8 @@ export default function SalaryCard({ persons }: Props) {
   const { data, mutate, saving } = useStore()
   const [personState, setPersonState] = useState(localStorage.getItem('kakeibo.furusatoPerson') || '')
   const [year, setYear] = useState(thisYear)
+  // 入力欄は既定で畳んでおき、表の行を押したときに開く
+  const [formOpen, setFormOpen] = useState(false)
   const [month, setMonth] = useState(1)
   const [form, setForm] = useState(EMPTY_MONTH)
   const [bonusBase, setBonusBase] = useState('')
@@ -199,6 +202,59 @@ export default function SalaryCard({ persons }: Props) {
           {allYears.map((y) => <option key={y} value={y}>{y}年</option>)}
         </select>
       </div>
+      <Collapsible
+        title={`${month}月分の入力`}
+        hint={form.gross ? `総支給 ${form.gross}` : '未入力'}
+        open={formOpen}
+        onToggle={setFormOpen}
+      >
+      <div className="seg" style={{ flexWrap: 'wrap' }}>
+        {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+          <button key={m} className={month === m ? 'on' : ''} style={{ flex: '1 0 14%' }} onClick={() => setMonth(m)}>{m}</button>
+        ))}
+      </div>
+      <div className="row2">
+        <label className="field">総支給額<CalcBadge kind="income" />
+          <input type="text" inputMode="numeric" value={form.gross} onChange={(e) => setForm({ ...form, gross: e.target.value })} /></label>
+        <label className="field">健康保険<CalcBadge kind="social" />
+          <input type="text" inputMode="numeric" value={form.health} onChange={(e) => setForm({ ...form, health: e.target.value })} /></label>
+      </div>
+      <div className="row2">
+        <label className="field">厚生年金保険<CalcBadge kind="social" />
+          <input type="text" inputMode="numeric" value={form.pension_ins} onChange={(e) => setForm({ ...form, pension_ins: e.target.value })} /></label>
+        <label className="field">雇用保険<CalcBadge kind="social" />
+          <input type="text" inputMode="numeric" value={form.employment} onChange={(e) => setForm({ ...form, employment: e.target.value })} /></label>
+      </div>
+      <div className="row2">
+        <label className="field">介護保険（40歳〜）<CalcBadge kind="social" />
+          <input type="text" inputMode="numeric" placeholder="0" value={form.care_ins} onChange={(e) => setForm({ ...form, care_ins: e.target.value })} /></label>
+        <label className="field" />
+      </div>
+      <div className="row2">
+        <label className="field">所得税<CalcBadge kind="none" />
+          <input type="text" inputMode="numeric" value={form.income_tax} onChange={(e) => setForm({ ...form, income_tax: e.target.value })} /></label>
+        <label className="field">住民税<CalcBadge kind="none" />
+          <input type="text" inputMode="numeric" value={form.resident_tax} onChange={(e) => setForm({ ...form, resident_tax: e.target.value })} /></label>
+      </div>
+      <div className="kv">
+        <span className="muted">
+          控除合計（自動計算）
+          <HelpTip>控除合計 = 健康保険 + 厚生年金保険 + 雇用保険 + 介護保険 + 所得税 + 住民税（自動計算のため保存はされません）。総支給 − 控除合計 = 手取りとして収支タブの収入にも使われます。</HelpTip>
+        </span>
+        <b>{formDeduction !== null ? yen(formDeduction) : '−'}</b>
+      </div>
+      <label className="field" style={{ marginTop: 6 }}>
+        その他収入（給与以外）
+        <HelpTip title="その他収入">給与以外の収入（副業・臨時収入など）を月単位で入力します。手取り（総支給−控除）にそのまま加算され、収支タブの「収入」になります。人ごと・月ごとに管理されます。</HelpTip>
+        <input type="text" inputMode="numeric" placeholder="任意" value={form.other_income} onChange={(e) => setForm({ ...form, other_income: e.target.value })} />
+      </label>
+      <button className="btn" onClick={() => void saveMonth()} disabled={saving}>{saving ? '保存中…' : `${month}月分を保存`}</button>
+      {salaries.some((s) => Number(s.month) === month) && (
+        <button className="btn danger" style={{ marginTop: 8 }} onClick={() => void clearMonth()}>この月の記録を削除</button>
+      )}
+
+      </Collapsible>
+
       {est ? (
         <>
           <div className="kv">
@@ -255,7 +311,7 @@ export default function SalaryCard({ persons }: Props) {
                   const estStyle = { color: 'var(--muted)', fontStyle: 'italic' as const }
                   return (
                     <tr key={g.month} style={{ borderTop: '1px solid var(--border)', cursor: 'pointer', background: month === g.month ? 'var(--bg3)' : undefined }}
-                      onClick={() => setMonth(g.month)}>
+                      onClick={() => { setMonth(g.month); setFormOpen(true) }}>
                       <td style={cell}>{g.month}月</td>
                       <td style={{ ...cell, ...(g.entered ? {} : estStyle) }}>{yen(g.gross)}{g.entered ? '' : '*'}</td>
                       <td style={{ ...cell, color: 'var(--amber)' }}>
@@ -275,58 +331,12 @@ export default function SalaryCard({ persons }: Props) {
           </div>
           <p className="muted" style={{ fontSize: 11, margin: '4px 0 0' }}>
             <span style={{ color: C_INCOME }}>■年収想定に使用</span>　<span style={{ color: C_SOCIAL }}>■社会保険料想定に使用</span>　■記録のみ（上限計算に影響なし）<br />
-            *印は未入力月（入力済み月の平均で想定）。行タップで下のフォームに読み込み。<br />
+            *印は未入力月（入力済み月の平均で想定）。行タップで上の入力欄に読み込み。<br />
             社会保険料想定 = 平均月社保×12 + ボーナス合計×社保率（賞与分の概算）
           </p>
         </>
       ) : (
         <p className="muted" style={{ fontSize: 13 }}>まだ給与の入力がありません。下のフォームから総支給額を入力すると年収を自動で想定します。</p>
-      )}
-
-      <h2 style={{ marginTop: 14 }}>{month}月分の入力</h2>
-      <div className="seg" style={{ flexWrap: 'wrap' }}>
-        {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
-          <button key={m} className={month === m ? 'on' : ''} style={{ flex: '1 0 14%' }} onClick={() => setMonth(m)}>{m}</button>
-        ))}
-      </div>
-      <div className="row2">
-        <label className="field">総支給額<CalcBadge kind="income" />
-          <input type="text" inputMode="numeric" value={form.gross} onChange={(e) => setForm({ ...form, gross: e.target.value })} /></label>
-        <label className="field">健康保険<CalcBadge kind="social" />
-          <input type="text" inputMode="numeric" value={form.health} onChange={(e) => setForm({ ...form, health: e.target.value })} /></label>
-      </div>
-      <div className="row2">
-        <label className="field">厚生年金保険<CalcBadge kind="social" />
-          <input type="text" inputMode="numeric" value={form.pension_ins} onChange={(e) => setForm({ ...form, pension_ins: e.target.value })} /></label>
-        <label className="field">雇用保険<CalcBadge kind="social" />
-          <input type="text" inputMode="numeric" value={form.employment} onChange={(e) => setForm({ ...form, employment: e.target.value })} /></label>
-      </div>
-      <div className="row2">
-        <label className="field">介護保険（40歳〜）<CalcBadge kind="social" />
-          <input type="text" inputMode="numeric" placeholder="0" value={form.care_ins} onChange={(e) => setForm({ ...form, care_ins: e.target.value })} /></label>
-        <label className="field" />
-      </div>
-      <div className="row2">
-        <label className="field">所得税<CalcBadge kind="none" />
-          <input type="text" inputMode="numeric" value={form.income_tax} onChange={(e) => setForm({ ...form, income_tax: e.target.value })} /></label>
-        <label className="field">住民税<CalcBadge kind="none" />
-          <input type="text" inputMode="numeric" value={form.resident_tax} onChange={(e) => setForm({ ...form, resident_tax: e.target.value })} /></label>
-      </div>
-      <div className="kv">
-        <span className="muted">
-          控除合計（自動計算）
-          <HelpTip>控除合計 = 健康保険 + 厚生年金保険 + 雇用保険 + 介護保険 + 所得税 + 住民税（自動計算のため保存はされません）。総支給 − 控除合計 = 手取りとして収支タブの収入にも使われます。</HelpTip>
-        </span>
-        <b>{formDeduction !== null ? yen(formDeduction) : '−'}</b>
-      </div>
-      <label className="field" style={{ marginTop: 6 }}>
-        その他収入（給与以外）
-        <HelpTip title="その他収入">給与以外の収入（副業・臨時収入など）を月単位で入力します。手取り（総支給−控除）にそのまま加算され、収支タブの「収入」になります。人ごと・月ごとに管理されます。</HelpTip>
-        <input type="text" inputMode="numeric" placeholder="任意" value={form.other_income} onChange={(e) => setForm({ ...form, other_income: e.target.value })} />
-      </label>
-      <button className="btn" onClick={() => void saveMonth()} disabled={saving}>{saving ? '保存中…' : `${month}月分を保存`}</button>
-      {salaries.some((s) => Number(s.month) === month) && (
-        <button className="btn danger" style={{ marginTop: 8 }} onClick={() => void clearMonth()}>この月の記録を削除</button>
       )}
 
       <h2 style={{ marginTop: 14 }}>いまの入力内容を他の月へコピー</h2>

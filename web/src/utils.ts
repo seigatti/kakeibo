@@ -1101,10 +1101,16 @@ export interface ProfitBucket {
   bucket: string
   /** その区切りで最後に値がある月の累計評価損益 */
   cumulative: number | null
-  /** その区切りで増えた評価損益 =（この区切りの累計）−（ひとつ前の区切りの累計）。前が無ければ null */
+  /** その区切りで増えた評価損益 =（この区切りの累計）−（ひとつ前の区切りの累計）。起点が無ければ null */
   gain: number | null
   /** その区切りで値があった月数（横軸ラベルの「(Nヶ月)」に使う） */
   monthCount: number
+  /**
+   * gain の起点が「ひとつ前の区切り」ではなく「この区切り自身の最初の値」か。
+   * 記録が始まった最初の年に立つ。12ヶ月そろっていても一年分の増加とは限らないので、
+   * 表示側で注記を出すために使う。
+   */
+  partial: boolean
 }
 
 /**
@@ -1122,13 +1128,30 @@ export function profitBuckets(
   const snap = assetSnapshotFilled(assets, months, currentMonth)
   const valueOf = (m: string) => snap.get(m)?.profit ?? null
   const buckets = bucketsOf(months, unit)
+  const groups = groupMonths(months, unit)
   const cum = lastByBucket(months, unit, valueOf)
-  const counts = groupMonths(months, unit).map((ms) => ms.filter((m) => valueOf(m) !== null).length)
+  const counts = groups.map((ms) => ms.filter((m) => valueOf(m) !== null).length)
   let prev: number | null = null
   return buckets.map((bucket, i) => {
     const cumulative = cum[i]
-    const gain = cumulative !== null && prev !== null ? cumulative - prev : null
+    // ひとつ前の区切りに値が無い＝評価損益の記録が始まった最初の年。
+    // 引く相手が無いまま非表示にするとその年が丸ごと消えてしまうので、
+    // 「その区切りの中で最初に値がある月」を起点にして、記録がある範囲での増加分を出す。
+    // 値のある月が1つだけの区切りは増減が測れない（必ず0になる）ので起点を作らない。
+    const fallback = counts[i] >= 2 ? firstValueOf(groups[i], valueOf) : null
+    const base = prev !== null ? prev : fallback
+    const partial = prev === null && base !== null
+    const gain = cumulative !== null && base !== null ? cumulative - base : null
     if (cumulative !== null) prev = cumulative
-    return { bucket, cumulative, gain, monthCount: counts[i] }
+    return { bucket, cumulative, gain, monthCount: counts[i], partial }
   })
+}
+
+/** その月の並びで最初に値がある月の値。無ければ null */
+function firstValueOf(months: string[], valueOf: (m: string) => number | null): number | null {
+  for (const m of months) {
+    const v = valueOf(m)
+    if (v !== null && v !== undefined && Number.isFinite(v)) return v
+  }
+  return null
 }

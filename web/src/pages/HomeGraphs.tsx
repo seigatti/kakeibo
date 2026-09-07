@@ -490,7 +490,9 @@ export default function HomeGraphs({ data }: { data: AllData }) {
                 <br /><b>年単位</b>は累計をそのまま出すと「その年にいくら増えたか」が読み取れないので、
                 <b>（その年の最後の値）−（前年の最後の値）</b>＝その年に増えた評価損益を出しています。
                 月ごとの増減を1年ぶん足し合わせた額と同じです。
-                <br />前年に記録が無い年は差が出せないので表示しません。
+                <br /><b>記録が始まった最初の年</b>は引く相手（前年末）が無いので、
+                その年で<b>最初に記録した月を起点</b>にしています（それより前に出ていた損益は分からないので含めません）。
+                その年の記録が1ヶ月しか無いと増減が測れないので表示しません。
                 年の途中までしか記録が無い年は、横軸に「(Nヶ月)」と月数を添えています。
               </HelpTip>
             </h2>
@@ -501,7 +503,22 @@ export default function HomeGraphs({ data }: { data: AllData }) {
                     labels: profitSeries.map((b) => bucketLabel(b.bucket, unit, b.monthCount)),
                     datasets: [{ label: 'その年の増加分', data: profitSeries.map((b) => b.gain), backgroundColor: profitSeries.map((b) => ((b.gain ?? 0) >= 0 ? '#4ade80' : '#f87171')) }],
                   }}
-                  options={{ maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: monthYenScales }}
+                  options={{
+                    maintainAspectRatio: false,
+                    scales: monthYenScales,
+                    plugins: {
+                      legend: { display: false },
+                      // 起点が前年末ではない年は、一年分の増加とは限らないので断っておく
+                      tooltip: {
+                        callbacks: {
+                          afterBody: (items: Array<{ dataIndex: number }>) =>
+                            items.length && profitSeries[items[0].dataIndex]?.partial
+                              ? '※ 評価損益の記録が始まった年なので、最初の記録からの増加分'
+                              : '',
+                        },
+                      },
+                    },
+                  }}
                 />
               ) : (
                 <Line

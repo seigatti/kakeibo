@@ -203,10 +203,10 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
     mode: 'both',
     options: [
       { value: '0', label: '止めない', note: '毎年ルールどおりに取り崩す' },
-      { value: '30', label: '現金比率30%以上で止める', note: '現金 ÷（現金＋投資）が30%以上の年は取り崩さない' },
-      { value: '40', label: '40%以上で止める', note: '現金 ÷（現金＋投資）が40%以上の年は取り崩さない' },
+      { value: '10', label: '現金比率10%以上で止める', note: '現金 ÷（現金＋投資）が10%以上の年は取り崩さない' },
+      { value: '20', label: '20%以上で止める', note: '現金 ÷（現金＋投資）が20%以上の年は取り崩さない' },
+      { value: '30', label: '30%以上で止める', note: '現金 ÷（現金＋投資）が30%以上の年は取り崩さない' },
       { value: '50', label: '50%以上で止める', note: '現金 ÷（現金＋投資）が50%以上の年は取り崩さない' },
-      { value: '60', label: '60%以上で止める', note: '現金 ÷（現金＋投資）が60%以上の年は取り崩さない' },
       { value: '70', label: '70%以上で止める', note: '現金 ÷（現金＋投資）が70%以上の年は取り崩さない' },
     ],
   },
@@ -319,9 +319,9 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
       { value: '1', label: '大きく上がる', note: '昇給率 = インフレ率 + 1%' },
       { value: '0.5', label: '上がる', note: '昇給率 = インフレ率 + 0.5%' },
       { value: '0', label: '横ばい', note: '昇給率 = インフレ率（物価と同じだけ賃上げ）' },
-      { value: '-0.5', label: '少し下がる', note: '昇給率 = インフレ率 − 0.5%' },
-      { value: '-1', label: '下がる', note: '昇給率 = インフレ率 − 1%' },
-      { value: '-2', label: '大きく下がる', note: '昇給率 = インフレ率 − 2%' },
+      { value: '-0.25', label: '少し下がる', note: '昇給率 = インフレ率 − 0.25%' },
+      { value: '-0.5', label: '下がる', note: '昇給率 = インフレ率 − 0.5%' },
+      { value: '-1', label: '大きく下がる', note: '昇給率 = インフレ率 − 1%' },
     ],
   },
   {
@@ -609,9 +609,9 @@ export function buildConfigFromAnswers(
   // インフレ率を確定させてから計算する（実質賃金0なら 昇給率 = インフレ率）
   const taxDrag = TAX_DRAG[answers.tax] ?? 0
   if (answers.real_wage !== undefined) {
-    cfg.raise_rate = Math.round((cfg.inflation + Number(answers.real_wage) - taxDrag) * 10) / 10
+    cfg.raise_rate = Math.round((cfg.inflation + Number(answers.real_wage) - taxDrag) * 100) / 100
   } else if (answers.tax) {
-    cfg.raise_rate = Math.round((base.raise_rate - taxDrag) * 10) / 10 // 実質賃金の回答が無い古い回答との互換
+    cfg.raise_rate = Math.round((base.raise_rate - taxDrag) * 100) / 100 // 実質賃金の回答が無い古い回答との互換
   }
   if (answers.retire) cfg.adults = cfg.adults.map((a) => ({ ...a, retire_age: Number(answers.retire) }))
   if (answers.living) cfg.living_cost = answers.living === 'auto' ? null : Number(answers.living)

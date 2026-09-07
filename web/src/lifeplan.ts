@@ -135,7 +135,8 @@ export interface SummaryRow {
   value: string
 }
 
-const pctStr = (v: number) => `${Math.round(v * 10) / 10}%`
+// 実質賃金 −0.25% のような小さな差が丸めで消えないよう、小数第2位まで残す
+const pctStr = (v: number) => `${Math.round(v * 100) / 100}%`
 
 /** シナリオの条件を「グループ・項目・値」に整形（プレビューや条件表示の単一の情報源） */
 export function scenarioSummaryRows(cfg: LifeplanConfig, opts?: { livingEstimate?: number | null }): SummaryRow[] {

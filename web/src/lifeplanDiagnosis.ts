@@ -57,7 +57,8 @@ export interface DiagnosisContext {
 }
 
 const pct = (v: number) => `${Math.round(v * 10) / 10}%`
-const round1 = (v: number) => Math.round(v * 10) / 10
+/** 実質賃金 −0.25% などを潰さないよう小数第2位まで */
+const round2 = (v: number) => Math.round(v * 100) / 100
 /** 万円表示（金額マスクに対応） */
 const man = (v: number) => (isMasked() ? '＊＊＊万円' : `${Math.round(v / 10_000).toLocaleString('ja-JP')}万円`)
 
@@ -82,7 +83,7 @@ function candidates(cfg: LifeplanConfig, ctx: DiagnosisContext): Candidate[] {
   const stdRetireAge = getConst('std_retire_age')
 
   // 年金の上昇率（物価にほぼ連動して改定される想定が標準）
-  const pensionStd = round1(cfg.inflation - slide)
+  const pensionStd = round2(cfg.inflation - slide)
   out.push({
     key: 'pension_growth',
     label: '年金の上昇率',
@@ -94,7 +95,7 @@ function candidates(cfg: LifeplanConfig, ctx: DiagnosisContext): Candidate[] {
   })
 
   // 実質賃金（昇給率 − インフレ率）
-  const realWage = round1(cfg.raise_rate - cfg.inflation)
+  const realWage = round2(cfg.raise_rate - cfg.inflation)
   out.push({
     key: 'real_wage',
     label: '実質賃金（昇給率 − インフレ率）',

@@ -3,7 +3,8 @@
  * 回答は選択肢ベース。回答が触れない項目は base（現在の設定）をそのまま引き継ぐので、
  * 大人（実際の給与データ由来）や既存のカスタム収支などは失われない。
  */
-import type { CustomFlow, LifeplanChild, LifeplanConfig } from './lifeplan.ts'
+import { DEFAULT_HOME, type CustomFlow, type LifeplanChild, type LifeplanConfig } from './lifeplan.ts'
+import { getConst } from './constants.ts'
 
 export type SurveyMode = 'simple' | 'detail'
 /** 質問ID → 選択した選択肢の value */
@@ -21,8 +22,17 @@ export interface SurveyQuestion {
   question: string
   /** both=両方 / simple=簡易版だけの「方針」質問 / detail=詳細版だけ */
   mode: 'both' | 'simple' | 'detail'
-  /** 既定の回答（省略時は先頭の選択肢） */
+  /**
+   * 既定の回答を基準値レジストリ（constants.ts）から採るときのキー。
+   * 「診断は65歳が標準と言うのにアンケートの初期値は60歳」のような食い違いを防ぐため、
+   * 標準値が定義されている項目はそちらを正とする。
+   * 値が選択肢に無い場合は defaultValue → 先頭の選択肢の順にフォールバックする。
+   */
+  defaultConst?: string
+  /** 既定の回答（defaultConst が使えないときに採用。省略時は先頭の選択肢） */
   defaultValue?: string
+  /** false を返すあいだ質問を出さない（例: 賃貸のままなら物件価格は聞かない） */
+  showIf?: (answers: SurveyAnswers) => boolean
   options: SurveyOption[]
 }
 
@@ -32,7 +42,6 @@ export const CARE_LABEL = '親の介護'
 
 /** 「一般的な支出」テンプレで作る行のラベル接頭辞（再適用・削除の目印） */
 export const STD_PREFIX = '一般:'
-export type StandardLevel = 'none' | 'standard' | 'high'
 
 const REPAIR_CYCLE_YEARS = 15
 const REPAIR_COST = 2_000_000 // 大規模修繕1回あたり
@@ -48,15 +57,14 @@ const MEDICAL_TIERS: Array<{ from: number; to: number; annual: number }> = [
 /**
  * 一般的なライフイベント支出のテンプレ行。
  * ラベルは STD_PREFIX 付きにしてあり、再適用時は同じ接頭辞の行を入れ替える想定。
- * level='high' は各額を1.5倍。'none' は空配列（＝呼び出し側で既存行が消える）。
+ * @param k 標準を1とした倍率。0 は空配列（＝呼び出し側で既存行が消える）
  */
 export function standardExpenseFlows(
   cfg: LifeplanConfig,
-  level: StandardLevel,
+  k: number,
   thisYear: number = new Date().getFullYear(),
 ): CustomFlow[] {
-  if (level === 'none') return []
-  const k = level === 'high' ? 1.5 : 1
+  if (!(k > 0)) return []
   const end = thisYear + 80
   const out: CustomFlow[] = []
 
@@ -89,9 +97,9 @@ export function standardExpenseFlows(
 }
 
 /** 既存のカスタム収支から「一般的な支出」行を入れ替える（手入力した行は残す） */
-export function applyStandardExpenses(cfg: LifeplanConfig, level: StandardLevel, thisYear?: number): CustomFlow[] {
+export function applyStandardExpenses(cfg: LifeplanConfig, k: number, thisYear?: number): CustomFlow[] {
   const kept = cfg.custom_flows.filter((f) => !f.label.startsWith(STD_PREFIX))
-  return [...kept, ...standardExpenseFlows(cfg, level, thisYear)]
+  return [...kept, ...standardExpenseFlows(cfg, k, thisYear)]
 }
 
 export const SURVEY_QUESTIONS: SurveyQuestion[] = [
@@ -105,6 +113,7 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
       { value: '1', label: '1人', note: '翌年生まれで作成' },
       { value: '2', label: '2人', note: '翌年・3年後生まれ' },
       { value: '3', label: '3人', note: '翌年・3年後・5年後生まれ' },
+      { value: '4', label: '4人', note: '翌年・3年後・5年後・7年後生まれ' },
     ],
   },
   {
@@ -115,6 +124,7 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
       { value: 'public', label: 'すべて公立' },
       { value: 'high', label: '高校から私立', note: '小・中は公立' },
       { value: 'junior', label: '中学から私立', note: '小学校は公立' },
+      { value: 'elementary', label: '小学校から私立', note: '小・中・高すべて私立' },
     ],
   },
   {
@@ -150,17 +160,21 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
     id: 'car',
     question: '車はどのくらいの頻度で買い替えますか？',
     mode: 'both',
+    defaultValue: '10',
     options: [
       { value: 'none', label: '持たない' },
+      { value: '20', label: '20年ごと', note: '1台を長く乗りつぶす' },
       { value: '15', label: '15年ごと' },
       { value: '10', label: '10年ごと' },
       { value: '7', label: '7年ごと' },
+      { value: '5', label: '5年ごと', note: '短いサイクルで乗り換える' },
     ],
   },
   {
     id: 'withdraw',
     question: '老後、投資をどう取り崩しますか？',
     mode: 'both',
+    defaultValue: 'rate4',
     options: [
       { value: 'none', label: '取り崩さない', note: '計画的な取り崩しはせず、現金が足りないときだけ取り崩す' },
       { value: 'rate4', label: '毎年4%', note: '投資残高の4%を現金化（いわゆる4%ルール）。退職の年から' },
@@ -176,8 +190,10 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
     mode: 'both',
     options: [
       { value: 'cover', label: '不足分だけ補う', note: '足りない分だけ投資を現金化する' },
+      { value: 'floor50', label: '現金50万を保つ', note: '現金が50万円を下回らないよう投資を現金化する' },
       { value: 'floor100', label: '現金100万を保つ', note: '現金が100万円を下回らないよう投資を現金化する' },
       { value: 'floor300', label: '現金300万を保つ', note: '現金が300万円を下回らないよう投資を現金化する' },
+      { value: 'floor500', label: '現金500万を保つ', note: '現金が500万円を下回らないよう投資を現金化する' },
       { value: 'none', label: '補わない', note: '投資には手を付けない（現金がマイナスになることがあります）' },
     ],
   },
@@ -188,7 +204,9 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
     options: [
       { value: '0', label: '止めない', note: '毎年ルールどおりに取り崩す' },
       { value: '30', label: '現金比率30%以上で止める', note: '現金 ÷（現金＋投資）が30%以上の年は取り崩さない' },
+      { value: '40', label: '40%以上で止める', note: '現金 ÷（現金＋投資）が40%以上の年は取り崩さない' },
       { value: '50', label: '50%以上で止める', note: '現金 ÷（現金＋投資）が50%以上の年は取り崩さない' },
+      { value: '60', label: '60%以上で止める', note: '現金 ÷（現金＋投資）が60%以上の年は取り崩さない' },
       { value: '70', label: '70%以上で止める', note: '現金 ÷（現金＋投資）が70%以上の年は取り崩さない' },
     ],
   },
@@ -196,11 +214,14 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
     id: 'invest_ratio',
     question: '収入のうち、どのくらいを資産運用に回したいですか？',
     mode: 'detail',
+    defaultConst: 'std_invest_ratio',
     options: [
       { value: '0', label: '0%', note: '黒字は現金のまま' },
       { value: '10', label: '10%' },
       { value: '20', label: '20%' },
       { value: '30', label: '30%' },
+      { value: '40', label: '40%' },
+      { value: '50', label: '50%', note: '黒字の半分を投資へ' },
     ],
   },
   {
@@ -208,46 +229,76 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
     question: '住まいはどう想定しますか？',
     mode: 'both',
     options: [
-      { value: 'rent', label: '賃貸のまま' },
+      { value: 'rent', label: '賃貸のまま／購入しない' },
+      { value: '3', label: '3年後に購入' },
       { value: '5', label: '5年後に購入' },
       { value: '10', label: '10年後に購入' },
+      { value: '15', label: '15年後に購入' },
+      { value: '20', label: '20年後に購入' },
+    ],
+  },
+  {
+    id: 'home_price',
+    question: '購入する住まいの価格は？（今の物価で）',
+    mode: 'both',
+    defaultValue: String(DEFAULT_HOME.price),
+    showIf: (a) => a.home !== undefined && a.home !== 'rent',
+    options: [
+      { value: '30000000', label: '3,000万' },
+      { value: '35000000', label: '3,500万' },
+      { value: '40000000', label: '4,000万' },
+      { value: '45000000', label: '4,500万' },
+      { value: '50000000', label: '5,000万' },
+      { value: '60000000', label: '6,000万' },
     ],
   },
   {
     id: 'tax',
     question: '税金・社会保険料は今後どうなると思いますか？',
     mode: 'detail',
+    defaultValue: 'mild',
     options: [
+      { value: 'down', label: '下がる', note: '昇給率 +0.3%' },
       { value: 'flat', label: '変わらない' },
+      { value: 'slight', label: 'やや上がる', note: '昇給率 −0.2%' },
       { value: 'mild', label: '少し上がる', note: '昇給率 −0.3%' },
       { value: 'steep', label: 'かなり上がる', note: '昇給率 −0.8%' },
+      { value: 'severe', label: '大幅に上がる', note: '昇給率 −1.2%' },
     ],
   },
   {
     id: 'standard',
     question: '一般的なライフイベント費用（住宅修繕・家電・冠婚葬祭・医療費）を含めますか？',
     mode: 'detail',
+    defaultValue: '1',
     options: [
-      { value: 'none', label: '含めない' },
-      { value: 'standard', label: '標準で含める', note: '家電5万/年・冠婚葬祭10万/年・医療費は年齢に応じて増加' },
-      { value: 'high', label: '多めに見る', note: '標準の1.5倍' },
+      { value: '0', label: '含めない' },
+      { value: '0.5', label: '少なめ', note: '標準の0.5倍' },
+      { value: '1', label: '標準で含める', note: '家電5万/年・冠婚葬祭10万/年・医療費は年齢に応じて増加' },
+      { value: '1.2', label: 'やや多め', note: '標準の1.2倍' },
+      { value: '1.5', label: '多めに見る', note: '標準の1.5倍' },
+      { value: '2', label: 'かなり多め', note: '標準の2倍' },
     ],
   },
-  // ---- ここから詳細版だけの質問 ----
   {
     id: 'style',
     question: '資産運用のスタイルは？',
     mode: 'detail',
+    defaultConst: 'std_invest_return',
     options: [
       { value: '1', label: '預金中心', note: '利回り 1%' },
+      { value: '2', label: '安全重視', note: '利回り 2%' },
       { value: '3', label: 'バランス', note: '利回り 3%' },
+      { value: '4', label: 'やや積極的', note: '利回り 4%' },
       { value: '5', label: '株式中心', note: '利回り 5%' },
+      { value: '6', label: 'かなり積極的', note: '利回り 6%' },
     ],
   },
   {
     id: 'inflation',
     question: '物価（インフレ）はどうなると思いますか？',
     mode: 'detail',
+    defaultConst: 'std_inflation',
     options: [
       { value: '1', label: '落ち着く', note: '1%' },
       { value: '1.5', label: 'やや低め', note: '1.5%' },
@@ -263,7 +314,9 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
     id: 'real_wage',
     question: '実質賃金（物価を差し引いた手取りの伸び）はどうなると思いますか？',
     mode: 'detail',
+    defaultValue: '0',
     options: [
+      { value: '1', label: '大きく上がる', note: '昇給率 = インフレ率 + 1%' },
       { value: '0.5', label: '上がる', note: '昇給率 = インフレ率 + 0.5%' },
       { value: '0', label: '横ばい', note: '昇給率 = インフレ率（物価と同じだけ賃上げ）' },
       { value: '-0.5', label: '少し下がる', note: '昇給率 = インフレ率 − 0.5%' },
@@ -275,7 +328,14 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
     id: 'retire',
     question: '何歳まで働く想定ですか？',
     mode: 'detail',
+    defaultConst: 'std_retire_age',
+    // 基準値を選択肢に無い年齢に変えられても、先頭の35歳（早期リタイア）に落ちないように
+    defaultValue: '65',
     options: [
+      { value: '35', label: '35歳', note: '早期リタイア' },
+      { value: '40', label: '40歳', note: '早期リタイア' },
+      { value: '50', label: '50歳', note: '早期リタイア' },
+      { value: '55', label: '55歳', note: '早期リタイア' },
       { value: '60', label: '60歳' },
       { value: '65', label: '65歳' },
       { value: '70', label: '70歳' },
@@ -287,19 +347,25 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
     mode: 'detail',
     options: [
       { value: 'auto', label: '実績から自動' },
+      { value: '2500000', label: '切り詰め', note: '年250万' },
       { value: '3000000', label: '節約', note: '年300万' },
       { value: '4000000', label: '標準', note: '年400万' },
       { value: '5000000', label: 'ゆとり', note: '年500万' },
+      { value: '6000000', label: 'かなりゆとり', note: '年600万' },
     ],
   },
   {
     id: 'care',
     question: '親の介護費用は想定しますか？',
     mode: 'detail',
+    defaultValue: '5-100',
     options: [
       { value: 'none', label: '想定しない' },
-      { value: 'light', label: '5年間・年100万' },
-      { value: 'heavy', label: '10年間・年150万' },
+      { value: '3-80', label: '3年間・年80万' },
+      { value: '5-100', label: '5年間・年100万' },
+      { value: '7-120', label: '7年間・年120万' },
+      { value: '10-150', label: '10年間・年150万' },
+      { value: '15-150', label: '15年間・年150万' },
     ],
   },
   // ---- ここから簡易版だけの「方針」質問（1問で詳細の複数項目が決まる） ----
@@ -317,6 +383,7 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
     id: 'policy_money',
     question: '家計の方針は？',
     mode: 'simple',
+    defaultValue: 'balance',
     options: [
       { value: 'saver', label: '堅実に貯める' },
       { value: 'balance', label: 'バランス' },
@@ -327,6 +394,7 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
     id: 'policy_future',
     question: '将来の見通しは？',
     mode: 'simple',
+    defaultValue: 'normal',
     options: [
       { value: 'optimistic', label: '楽観的' },
       { value: 'normal', label: '標準的' },
@@ -335,7 +403,6 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
   },
 ]
 
-/** 方針の回答 → 詳細質問の回答。ここを変えれば画面の説明（answerEffects）も自動で追従する */
 export const POLICY_MAP: Record<string, Record<string, SurveyAnswers>> = {
   policy_education: {
     public: { school: 'public', college: 'public', course: 'univ', child_living: 'home' },
@@ -343,9 +410,9 @@ export const POLICY_MAP: Record<string, Record<string, SurveyAnswers>> = {
     best: { school: 'junior', college: 'private', course: 'grad', child_living: 'alone' },
   },
   policy_money: {
-    saver: { invest_ratio: '30', living: '3000000', standard: 'standard', style: '3' },
-    balance: { invest_ratio: '20', living: 'auto', standard: 'standard', style: '3' },
-    enjoy: { invest_ratio: '10', living: '5000000', standard: 'high', style: '1' },
+    saver: { invest_ratio: '30', living: '3000000', standard: '1', style: '3' },
+    balance: { invest_ratio: '20', living: 'auto', standard: '1', style: '3' },
+    enjoy: { invest_ratio: '10', living: '5000000', standard: '1.5', style: '1' },
   },
   policy_future: {
     optimistic: { inflation: '1', real_wage: '0.5', tax: 'flat', retire: '60' },
@@ -400,14 +467,32 @@ export function answerEffects(questionId: string, value: string, ctx?: EffectCon
 export const questionsFor = (mode: SurveyMode) =>
   SURVEY_QUESTIONS.filter((q) => q.mode === 'both' || q.mode === mode)
 
-/** その質問セットの既定回答（＝各質問の最初の選択肢） */
+/**
+ * その質問の既定回答。「標準とされる選択肢」を選ぶ。
+ * defaultConst（constants.ts の基準値）→ defaultValue → 先頭の選択肢 の順に、
+ * **選択肢に実在する値**が見つかったところで採用する
+ * （設定で std_retire_age を63などにしても、どれも選ばれていない状態にならないように）。
+ */
+export function defaultAnswerOf(q: SurveyQuestion): string {
+  const has = (v: string | undefined) => v !== undefined && q.options.some((o) => o.value === v)
+  const fromConst = q.defaultConst ? String(getConst(q.defaultConst)) : undefined
+  if (has(fromConst)) return fromConst!
+  if (has(q.defaultValue)) return q.defaultValue!
+  return q.options[0].value
+}
+
+/** その質問セットの既定回答 */
 export function defaultAnswers(mode: SurveyMode): SurveyAnswers {
   const out: SurveyAnswers = {}
-  for (const q of questionsFor(mode)) out[q.id] = q.defaultValue ?? q.options[0].value
+  for (const q of questionsFor(mode)) out[q.id] = defaultAnswerOf(q)
   return out
 }
 
 const CHILD_OFFSETS = [1, 3, 5] // 何年後に生まれる想定か
+/** アンケートで購入を選んだときの頭金の割合（残りをローンにする） */
+const HOME_DOWN_RATIO = 0.1
+/** 税・社会保険料の負担増ぶん、昇給率から差し引く％ */
+const TAX_DRAG: Record<string, number> = { down: -0.3, flat: 0, slight: 0.2, mild: 0.3, steep: 0.8, severe: 1.2 }
 
 /** 回答から新しいシナリオ設定を作る。回答が触れない項目は base のまま */
 export function buildConfigFromAnswers(
@@ -442,10 +527,11 @@ export function buildConfigFromAnswers(
 
   // 小・中・高（私立が始まる段階。大学は別の質問で決める）
   if (answers.school) {
-    const from = ({ public: 99, high: 2, junior: 1 } as Record<string, number>)[answers.school] ?? 99 // 1=中学 2=高校
+    // 0=小学校 1=中学 2=高校（99=ずっと公立）。その段階以降は私立になる
+    const from = ({ public: 99, high: 2, junior: 1, elementary: 0 } as Record<string, number>)[answers.school] ?? 99
     cfg.children = cfg.children.map((c) => ({
       ...c,
-      elementary: '公立',
+      elementary: from <= 0 ? '私立' : '公立',
       junior: from <= 1 ? '私立' : '公立',
       high: from <= 2 ? '私立' : '公立',
     }))
@@ -482,22 +568,37 @@ export function buildConfigFromAnswers(
     })
   }
   if (answers.care && answers.care !== 'none') {
-    const heavy = answers.care === 'heavy'
-    added.push({
-      label: CARE_LABEL,
-      start_year: thisYear + 10,
-      end_year: thisYear + 10 + (heavy ? 9 : 4),
-      annual: heavy ? -1_500_000 : -1_000_000,
-    })
+    // '年数-年額(万円)' の形。2026年の10年後から始まる想定
+    const [years, manYen] = answers.care.split('-').map(Number)
+    if (years > 0 && manYen > 0) {
+      added.push({
+        label: CARE_LABEL,
+        start_year: thisYear + 10,
+        end_year: thisYear + 10 + years - 1,
+        annual: -manYen * 10_000,
+      })
+    }
   }
   cfg.custom_flows = [...others, ...added]
 
   if (answers.invest_ratio) cfg.invest_ratio = Number(answers.invest_ratio)
 
-  // 住まい
+  // 住まい。価格は「今の物価での額」として持ち、購入年までのインフレは simulate 側で掛ける
   if (answers.home) {
-    if (answers.home === 'rent') cfg.home = { ...cfg.home, enabled: false }
-    else cfg.home = { ...cfg.home, enabled: true, buy_year: thisYear + Number(answers.home) }
+    if (answers.home === 'rent') {
+      cfg.home = { ...cfg.home, enabled: false }
+    } else {
+      const price = Number(answers.home_price) || DEFAULT_HOME.price
+      const down = Math.round(price * HOME_DOWN_RATIO)
+      cfg.home = {
+        ...cfg.home,
+        enabled: true,
+        buy_year: thisYear + Number(answers.home),
+        price,
+        down_payment: down,
+        loan_amount: price - down,
+      }
+    }
   }
 
   // ---- 詳細版 ----
@@ -506,7 +607,7 @@ export function buildConfigFromAnswers(
 
   // 昇給率（名目）= インフレ率 + 実質賃金 − 税・社会保険料の負担増。
   // インフレ率を確定させてから計算する（実質賃金0なら 昇給率 = インフレ率）
-  const taxDrag = answers.tax === 'steep' ? 0.8 : answers.tax === 'mild' ? 0.3 : 0
+  const taxDrag = TAX_DRAG[answers.tax] ?? 0
   if (answers.real_wage !== undefined) {
     cfg.raise_rate = Math.round((cfg.inflation + Number(answers.real_wage) - taxDrag) * 10) / 10
   } else if (answers.tax) {
@@ -537,15 +638,15 @@ export function buildConfigFromAnswers(
 
   if (answers.withdraw_skip !== undefined) cfg.withdraw_skip_cash_ratio = Number(answers.withdraw_skip)
 
-  // 現金が足りなくなったときの扱い
+  // 現金が足りなくなったときの扱い。'floorNNN' の NNN は万円
   if (answers.shortfall) {
     const sf = answers.shortfall
     cfg.shortfall_cover = sf !== 'none'
-    cfg.cash_floor = sf === 'floor100' ? 1_000_000 : sf === 'floor300' ? 3_000_000 : 0
+    cfg.cash_floor = sf.startsWith('floor') ? Number(sf.slice(5)) * 10_000 : 0
   }
 
-  // 一般的な支出は住まい・大人が確定したあとで組み立てる
-  if (answers.standard) cfg.custom_flows = applyStandardExpenses(cfg, answers.standard as StandardLevel, thisYear)
+  // 一般的な支出は住まい・大人が確定したあとで組み立てる（値は標準を1とした倍率）
+  if (answers.standard) cfg.custom_flows = applyStandardExpenses(cfg, Number(answers.standard), thisYear)
 
   return cfg
 }

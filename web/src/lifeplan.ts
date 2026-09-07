@@ -189,7 +189,10 @@ export function scenarioSummaryRows(cfg: LifeplanConfig, opts?: { livingEstimate
 
   // ---- 住まい ----
   if (cfg.home?.enabled) {
-    add('住まい', 'マイホーム購入', `${cfg.home.buy_year}年・${yen(cfg.home.price)}`)
+    // 金額は「今の物価」で持ち、購入年までのインフレを掛けた額で試算する（simulate と同じ換算）
+    const buyInfl = Math.pow(1 + cfg.inflation / 100, Math.max(0, cfg.home.buy_year - new Date().getFullYear()))
+    const nominal = buyInfl > 1 ? `（今の物価。購入時 約${yen(cfg.home.price * buyInfl)}）` : '（今の物価）'
+    add('住まい', 'マイホーム購入', `${cfg.home.buy_year}年・${yen(cfg.home.price)}${nominal}`)
     add('住まい', 'ローン', `${yen(cfg.home.loan_amount)}・${cfg.home.interest_rate}%・${cfg.home.loan_years}年`)
   }
 
@@ -438,19 +441,24 @@ export function simulate(
       }
     }
 
-    // マイホーム（現在価格。インフレは掛けない＝購入時点の実額として扱う）
+    // マイホーム。HomePlan の金額はすべて「今の物価での額」として持つ（生活費などと同じ規約）。
+    // 物件価格・頭金・借入額は購入年までのインフレで名目額に換算し、
+    // ローンの返済額は固定金利なので購入後はずっと同じ名目額のまま（ここで再度インフレを掛けない）。
     let homeNet = 0 // プラス=収入方向（家賃控除・ローン控除）、マイナス=支出
     const h = cfg.home
     if (h?.enabled) {
-      if (year === h.buy_year) homeNet -= h.down_payment + h.price * (getConst('home_fee_rate') / 100) // 頭金＋諸費用
+      const buyInfl = Math.pow(1 + cfg.inflation / 100, Math.max(0, h.buy_year - startYear))
+      const price = h.price * buyInfl
+      const loan = h.loan_amount * buyInfl
+      if (year === h.buy_year) homeNet -= h.down_payment * buyInfl + price * (getConst('home_fee_rate') / 100) // 頭金＋諸費用
       const elapsed = year - h.buy_year
-      if (elapsed >= 0 && elapsed < h.loan_years) homeNet -= annualLoanPayment(h.loan_amount, h.interest_rate, h.loan_years)
+      if (elapsed >= 0 && elapsed < h.loan_years) homeNet -= annualLoanPayment(loan, h.interest_rate, h.loan_years)
       if (elapsed >= 0) {
-        homeNet -= h.renovation_annual // 修繕・維持費
-        homeNet += h.current_rent_monthly * 12 // 購入で家賃が消える＝支出減
+        homeNet -= h.renovation_annual * infl // 修繕・維持費（その年の物価で）
+        homeNet += h.current_rent_monthly * 12 * infl // 購入で家賃が消える＝支出減（家賃も物価に連動する前提）
       }
       if (elapsed >= 0 && elapsed < h.loan_deduction_years) {
-        homeNet += Math.min(loanBalance(h.loan_amount, h.interest_rate, h.loan_years, elapsed) * (getConst('home_loan_deduction_rate') / 100), getConst('home_loan_deduction_cap')) // 住宅ローン控除（残高×率・上限内・簡易）
+        homeNet += Math.min(loanBalance(loan, h.interest_rate, h.loan_years, elapsed) * (getConst('home_loan_deduction_rate') / 100), getConst('home_loan_deduction_cap')) // 住宅ローン控除（残高×率・上限内・簡易）
       }
     }
 

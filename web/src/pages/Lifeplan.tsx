@@ -227,6 +227,28 @@ export default function Lifeplan() {
     setMsg('')
   }
 
+  if (survey) {
+    return (
+      <ScenarioSurveyCard
+        base={cfg ?? { ...DEFAULT_LIFEPLAN, adults: persons.map(NEW_ADULT) }}
+        saving={saving}
+        livingEstimate={livingEstimate}
+        onSave={async (name, generated) => {
+          const exists = scenarios.some((x) => x.name === name)
+          const next = exists
+            ? scenarios.map((x) => (x.name === name ? { name, config: generated } : x))
+            : [...scenarios, { name, config: generated }]
+          await persistScenarios(next)
+          setSurvey(false)
+          setPlanA(name)
+          setMsg(`シナリオ「${name}」を作成しました ✓`)
+        }}
+        onApply={(generated) => startEdit(generated, null)}
+        onCancel={() => { setSurvey(false); setMsg('') }}
+      />
+    )
+  }
+
   // シナリオがまだ無いときは作成を促す（アンケート画面・編集画面はこの前で分岐する）
   if (!cfg || !result) {
     if (!data) return <p className="muted center">読み込み中…</p>
@@ -395,28 +417,6 @@ export default function Lifeplan() {
         saving={saving}
         onSave={(n) => void commitEdit(n)}
         onCancel={cancelEdit}
-      />
-    )
-  }
-
-  if (survey) {
-    return (
-      <ScenarioSurveyCard
-        base={cfg}
-        saving={saving}
-        livingEstimate={livingEstimate}
-        onSave={async (name, generated) => {
-          const exists = scenarios.some((x) => x.name === name)
-          const next = exists
-            ? scenarios.map((x) => (x.name === name ? { name, config: generated } : x))
-            : [...scenarios, { name, config: generated }]
-          await persistScenarios(next)
-          setSurvey(false)
-          setPlanA(name)
-          setMsg(`シナリオ「${name}」を作成しました ✓`)
-        }}
-        onApply={(generated) => startEdit(generated, null)}
-        onCancel={() => { setSurvey(false); setMsg('') }}
       />
     )
   }

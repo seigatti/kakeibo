@@ -35,7 +35,12 @@ export default function ScenarioSurveyCard({ base, onSave, onApply, onCancel, li
   const [name, setName] = useState('')
   const [msg, setMsg] = useState('')
 
-  const questions = useMemo(() => questionsFor(mode), [mode])
+  // showIf を持つ質問は、条件を満たすときだけ出す（例: 賃貸のままなら物件価格は聞かない）。
+  // 番号は表示している質問の連番なので、消えた質問の番号は欠番にならない。
+  const questions = useMemo(
+    () => questionsFor(mode).filter((q) => !q.showIf || q.showIf(answers)),
+    [mode, answers],
+  )
   const generated = useMemo(() => buildConfigFromAnswers(answers, base), [answers, base])
   const previewRows = useMemo(
     () => scenarioSummaryRows(generated, { livingEstimate: livingEstimate?.annual ?? null }),

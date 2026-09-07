@@ -223,6 +223,8 @@ export interface NetWorthPoint {
   liabilities: number
   /** 実績が無い月（未来など）は null */
   netWorth: number | null
+  /** 実績ではなく前月から引き継いだ値か（fill=true のときだけ true になりうる） */
+  carried: boolean
 }
 
 /** 資産スナップショットのある月ごとの純資産（資産 − 負債） */
@@ -236,14 +238,22 @@ export function netWorthOver(
   assets: AssetRow[],
   liabilities: LiabilityRow[],
   currentMonth: string = thisMonth(),
+  /** true なら記録が無い月に前月の値を引き継ぐ（表示用。詳細は assetSnapshotFilled） */
+  fill = false,
 ): NetWorthPoint[] {
-  const snap = assetSnapshotByMonthEnd(assets)
+  const snap = fill ? assetSnapshotFilled(assets, months, currentMonth) : assetSnapshotByMonthEnd(assets)
   return months.map((month) => {
     // 返済スケジュールから出る残高は小数が出るので、表示・ツールチップ用に円未満は丸める
     const liab = Math.round(totalLiabilitiesAt(liabilities, month, currentMonth))
     const s = snap.get(month)
     const a = s ? s.total : null
-    return { month, assets: a, liabilities: liab, netWorth: a === null ? null : Math.round(a - liab) }
+    return {
+      month,
+      assets: a,
+      liabilities: liab,
+      netWorth: a === null ? null : Math.round(a - liab),
+      carried: s?.carried ?? false,
+    }
   })
 }
 
@@ -253,7 +263,7 @@ export function netWorthByMonth(assets: AssetRow[], liabilities: LiabilityRow[],
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([month, s]) => {
       const liab = totalLiabilitiesAt(liabilities, month, currentMonth)
-      return { month, assets: s.total, liabilities: liab, netWorth: s.total - liab }
+      return { month, assets: s.total, liabilities: liab, netWorth: s.total - liab, carried: false }
     })
 }
 
@@ -263,6 +273,12 @@ export interface MonthEndSnapshot {
   pension: number | null
   profit: number | null // その月のバケット内に記録があった場合のみ（鮮度必須）
   total: number
+  /** このバケットに最後に寄与した記録の日付（YYYY-MM-DD）。引き継ぎ可否の判定に使う */
+  date: string
+  /** そのバケットで最後に mf_profit を記録した日付。記録が無ければ null */
+  profitDate: string | null
+  /** 実績ではなく前月から引き継いだ値か（assetSnapshotFilled でのみ true になりうる） */
+  carried: boolean
 }
 
 /** スナップショットをどの「月末」の値として扱うか。日が5以下なら前月末とみなす（月初転記の運用に対応） */
@@ -287,6 +303,7 @@ export function assetSnapshotByMonthEnd(assets: AssetRow[]): Map<string, MonthEn
   let pension: number | null = null
   let profit: number | null = null
   let profitBucket: string | null = null
+  let profitDate: string | null = null
   for (const a of sortedAssets(assets)) {
     const m = snapshotBucket(a.date)
     if (a.investment !== null) inv = a.investment
@@ -295,6 +312,7 @@ export function assetSnapshotByMonthEnd(assets: AssetRow[]): Map<string, MonthEn
     if (a.mf_profit !== null) {
       profit = a.mf_profit
       profitBucket = m
+      profitDate = a.date
     }
     if (inv === null && cash === null && pension === null) continue
     map.set(m, {
@@ -303,9 +321,76 @@ export function assetSnapshotByMonthEnd(assets: AssetRow[]): Map<string, MonthEn
       pension,
       profit: profitBucket === m ? profit : null,
       total: (inv ?? 0) + (cash ?? 0) + (pension ?? 0),
+      date: a.date,
+      profitDate: profitBucket === m ? profitDate : null,
+      carried: false,
     })
   }
   return map
+}
+
+/** その年月の日数（'YYYY-MM'） */
+function daysInMonth(month: string): number {
+  return new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0).getDate()
+}
+
+/**
+ * その月の記録を「翌月以降へ引き継いでよいか」。
+ * 記録日がその月の**末日から15日以内**のときだけ許す。
+ * 月の前半の記録（例: 1/13）は月末の実態から離れすぎているので引き継がない。
+ * 月初転記（2/1〜2/5 の記録は snapshotBucket により1月扱い）は距離が0以下になり常に許可。
+ * 月の長さは月ごとに見るので、2月(28日)なら 2/13 以降が対象になる。
+ */
+export function carryEligible(bucket: string, date: string): boolean {
+  const last = daysInMonth(bucket)
+  const sameMonth = date.slice(0, 7) === bucket
+  // バケットより後の月の記録（月初転記）は末日を過ぎているので距離0扱い
+  if (!sameMonth) return date.slice(0, 7) > bucket
+  return last - Number(date.slice(8, 10)) <= 15
+}
+
+/**
+ * 月の並びに沿った資産スナップショット（**表示専用**）。
+ * 記録が無い月は直前の実績月の値をそのまま引き継ぐ。
+ * - 引き継げるのは、引き継ぎ元の月の最後の記録が `carryEligible` を満たすときだけ
+ * - 引き継ぎは次の実績月の手前まで。実績が尽きたあとは currentMonth まで（**未来の月は埋めない**）
+ * - mf_profit もここでは引き継ぐ。その他支出の推計は `assetSnapshotByMonthEnd` を使い続けるので、
+ *   「Δ損益が0になって投資の値動きが支出に混入する」問題（同関数のコメント参照）は起きない
+ */
+export function assetSnapshotFilled(
+  assets: AssetRow[],
+  months: string[],
+  currentMonth: string = thisMonth(),
+): Map<string, MonthEndSnapshot> {
+  const snap = assetSnapshotByMonthEnd(assets)
+  const out = new Map<string, MonthEndSnapshot>()
+  // 直前の実績月の値。引き継げない記録だったときは null にして穴を残す
+  let carry: MonthEndSnapshot | null = null
+  // 直近の評価損益。記録のある月でも損益だけ欠けることがある（Zaim側だけ記録した月など）
+  let lastProfit: { value: number; date: string; bucket: string } | null = null
+  for (const m of months) {
+    const real = snap.get(m)
+    if (real) {
+      const useLast = real.profit === null && lastProfit !== null
+      const filled: MonthEndSnapshot = useLast
+        ? { ...real, profit: lastProfit!.value, profitDate: lastProfit!.date }
+        : real
+      out.set(m, filled)
+      if (real.profit !== null && real.profitDate !== null) {
+        lastProfit = { value: real.profit, date: real.profitDate, bucket: m }
+      }
+      // 月末から離れた記録は翌月の実態として使えないので、そこで引き継ぎを打ち切る
+      if (carryEligible(m, real.date)) {
+        carry = { ...filled, carried: true }
+      } else {
+        carry = null
+        lastProfit = null
+      }
+      continue
+    }
+    if (carry && m <= currentMonth) out.set(m, carry)
+  }
+  return out
 }
 
 export interface NonInvestBreakdown {
@@ -508,16 +593,23 @@ export interface AllocationPoint {
 }
 
 /** 各資産スナップショットの投資/現金/年金の構成比（%）の推移。全項目0の記録はスキップ */
-export function assetAllocationTrend(assets: AssetRow[]): AllocationPoint[] {
-  return sortedAssets(assets)
-    .map((a) => {
-      const inv = a.investment ?? 0
-      const cash = a.cash ?? 0
-      const pen = a.pension ?? 0
+export function assetAllocationTrend(
+  assets: AssetRow[],
+  months: string[],
+  currentMonth: string = thisMonth(),
+): AllocationPoint[] {
+  const snap = assetSnapshotFilled(assets, months, currentMonth)
+  return months
+    .map((month) => {
+      const s = snap.get(month)
+      if (!s) return null
+      const inv = s.invest ?? 0
+      const cash = s.cash ?? 0
+      const pen = s.pension ?? 0
       const t = inv + cash + pen
       if (t <= 0) return null
       return {
-        month: a.date.slice(0, 7),
+        month,
         investPct: Math.round((inv / t) * 1000) / 10,
         cashPct: Math.round((cash / t) * 1000) / 10,
         pensionPct: Math.round((pen / t) * 1000) / 10,
@@ -996,4 +1088,47 @@ export function bucketMonthCount(months: string[], unit: Unit): number[] {
 export function bucketLabel(bucket: string, unit: Unit, monthCount: number): string {
   if (unit === 'month') return bucket.slice(2)
   return monthCount < 12 ? `${bucket}(${monthCount}ヶ月)` : bucket
+}
+
+/** その区切りが表示期間に入っているか（年単位なら 'YYYY' と 'YYYY-MM' を年で比べる） */
+export function bucketInRange(bucket: string, unit: Unit, from: string, to: string): boolean {
+  if (unit === 'month') return bucket >= from && bucket <= to
+  return bucket >= from.slice(0, 4) && bucket <= to.slice(0, 4)
+}
+
+export interface ProfitBucket {
+  /** 区切りのキー（'YYYY-MM' または 'YYYY'） */
+  bucket: string
+  /** その区切りで最後に値がある月の累計評価損益 */
+  cumulative: number | null
+  /** その区切りで増えた評価損益 =（この区切りの累計）−（ひとつ前の区切りの累計）。前が無ければ null */
+  gain: number | null
+  /** その区切りで値があった月数（横軸ラベルの「(Nヶ月)」に使う） */
+  monthCount: number
+}
+
+/**
+ * 評価損益を区切りごとにまとめる。
+ * 月単位は「その月末の累計」、年単位は「その年に増えた分」を見たいので両方返す。
+ * gain は months の中でしか遡らないので、**実績の最古月から渡すこと**
+ * （表示期間の先頭年でも前年末の値を引けるようにするため）。
+ */
+export function profitBuckets(
+  assets: AssetRow[],
+  months: string[],
+  unit: Unit,
+  currentMonth: string = thisMonth(),
+): ProfitBucket[] {
+  const snap = assetSnapshotFilled(assets, months, currentMonth)
+  const valueOf = (m: string) => snap.get(m)?.profit ?? null
+  const buckets = bucketsOf(months, unit)
+  const cum = lastByBucket(months, unit, valueOf)
+  const counts = groupMonths(months, unit).map((ms) => ms.filter((m) => valueOf(m) !== null).length)
+  let prev: number | null = null
+  return buckets.map((bucket, i) => {
+    const cumulative = cum[i]
+    const gain = cumulative !== null && prev !== null ? cumulative - prev : null
+    if (cumulative !== null) prev = cumulative
+    return { bucket, cumulative, gain, monthCount: counts[i] }
+  })
 }

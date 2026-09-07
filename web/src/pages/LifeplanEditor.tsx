@@ -362,7 +362,7 @@ export default function LifeplanEditor({
           <button className="btn secondary small" onClick={() => upd({ custom_flows: [...cfg.custom_flows, { label: '車の買替', start_year: thisYear + 5, end_year: thisYear + 5, annual: -2_500_000 }] })}>
             ＋ 車の買替
           </button>
-          <button className="btn secondary small" onClick={() => upd({ custom_flows: applyStandardExpenses(cfg, 'standard') })}>
+          <button className="btn secondary small" onClick={() => upd({ custom_flows: applyStandardExpenses(cfg, 1) })}>
             ＋ 一般的な支出をまとめて
           </button>
           <HelpTip title="テンプレの目安">
@@ -380,7 +380,9 @@ export default function LifeplanEditor({
             購入年に頭金＋諸費用（物件価格の約7%）を支出。返済期間中は元利均等の年間返済額を支出。
             購入後は修繕・維持費（年額）を支出に加え、現在の家賃×12を支出から控除します（購入で家賃が消えるため）。
             住宅ローン控除は年末残高×0.7%（年上限内・簡易）を控除年数だけ収入側に加算します。
-            金額は購入時点の実額として扱います（インフレは掛けません）。
+            金額はすべて<b>今の物価での額</b>として入力します。
+            物件価格・頭金・借入額は<b>購入年までのインフレを掛けた額</b>で計算し（例: インフレ2%で30年後購入なら約1.8倍）、
+            返済額は固定金利なので購入後はずっと同じ額のままです。家賃と修繕費は毎年の物価に合わせて増えます。
           </HelpTip>
         </h2>
         <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
@@ -393,13 +395,13 @@ export default function LifeplanEditor({
             <div className="row2">
               <label className="field">購入年
                 <input type="text" inputMode="numeric" value={cfg.home.buy_year} onChange={(e) => upd({ home: { ...cfg.home, buy_year: Number(e.target.value) || thisYear } })} /></label>
-              <label className="field">物件価格
+              <label className="field">物件価格（今の物価で）
                 <input type="text" inputMode="numeric" value={cfg.home.price} onChange={(e) => upd({ home: { ...cfg.home, price: Number(e.target.value.replace(/[,，]/g, '')) || 0 } })} /></label>
             </div>
             <div className="row2">
-              <label className="field">頭金
+              <label className="field">頭金（今の物価で）
                 <input type="text" inputMode="numeric" value={cfg.home.down_payment} onChange={(e) => upd({ home: { ...cfg.home, down_payment: Number(e.target.value.replace(/[,，]/g, '')) || 0 } })} /></label>
-              <label className="field">借入額（住宅ローン）
+              <label className="field">借入額（住宅ローン・今の物価で）
                 <input type="text" inputMode="numeric" value={cfg.home.loan_amount} onChange={(e) => upd({ home: { ...cfg.home, loan_amount: Number(e.target.value.replace(/[,，]/g, '')) || 0 } })} /></label>
             </div>
             <div className="row2">
@@ -410,7 +412,7 @@ export default function LifeplanEditor({
             <div className="row2">
               <label className="field">現在の家賃（月額・購入後は控除）
                 <input type="text" inputMode="numeric" value={cfg.home.current_rent_monthly} onChange={(e) => upd({ home: { ...cfg.home, current_rent_monthly: Number(e.target.value.replace(/[,，]/g, '')) || 0 } })} /></label>
-              <label className="field">修繕・維持費（年額）
+              <label className="field">修繕・維持費（年額・今の物価で）
                 <input type="text" inputMode="numeric" value={cfg.home.renovation_annual} onChange={(e) => upd({ home: { ...cfg.home, renovation_annual: Number(e.target.value.replace(/[,，]/g, '')) || 0 } })} /></label>
             </div>
             <label className="field">住宅ローン控除の年数（0=なし）

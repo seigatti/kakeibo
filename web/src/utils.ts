@@ -92,6 +92,14 @@ export const assetTotal = (a: AssetRow) => (a.investment ?? 0) + (a.cash ?? 0) +
 
 export const sortedAssets = (assets: AssetRow[]) => [...assets].sort((x, y) => x.date.localeCompare(y.date))
 
+/**
+ * その記録の「今月の投資増減」。
+ * 以前は「評価損益(mf_profit)」と「今月の投資増減(monthly_gain)」の2列で
+ * 同じもの（マネフォ総資産ページの「今月」）を二重管理していたので統合した。
+ * 旧列に手入力の履歴が残っているので、新列を優先しつつ無ければ旧列を見る。
+ */
+export const monthlyGainOf = (a: AssetRow): number | null => a.monthly_gain ?? a.mf_profit
+
 /** 資産のうち、金額として増減を見る項目 */
 export type AssetItemKey = 'investment' | 'cash' | 'pension'
 
@@ -294,12 +302,12 @@ export function snapshotBucket(date: string): string {
 }
 
 /**
- * 各月の「月末時点」の資産合計と評価損益。
+ * 各月の「月末時点」の資産合計と今月の投資増減。
  * - 日が5以下の記録は前月末の値として扱う（例: 7/1の記録 = 6月末）
  * - 投資・現金・年金は項目ごとに「最後に記録された値」で合成（MF用とZaim用の
  *   ブックマークレットを別の日にタップしても総資産が壊れない）
- * - 評価損益はその月のバケット内に記録がある場合のみ採用（古い値の持ち越しは
- *   Δ損益を0に見せて投資の値動きがその他支出に混入するため、無い月はnull）
+ * - 増減はその月のバケット内に記録がある場合のみ採用（フロー値なので、
+ *   古い値を持ち越すと年合計で二重計上になる。無い月は null）
  */
 export function assetSnapshotByMonthEnd(assets: AssetRow[]): Map<string, MonthEndSnapshot> {
   const map = new Map<string, MonthEndSnapshot>()
@@ -314,8 +322,9 @@ export function assetSnapshotByMonthEnd(assets: AssetRow[]): Map<string, MonthEn
     if (a.investment !== null) inv = a.investment
     if (a.cash !== null) cash = a.cash
     if (a.pension !== null) pension = a.pension
-    if (a.mf_profit !== null) {
-      profit = a.mf_profit
+    const gain = monthlyGainOf(a)
+    if (gain !== null) {
+      profit = gain
       profitBucket = m
       profitDate = a.date
     }
@@ -1092,7 +1101,7 @@ export function bucketInRange(bucket: string, unit: Unit, from: string, to: stri
   return bucket >= from.slice(0, 4) && bucket <= to.slice(0, 4)
 }
 
-export interface ProfitBucket {
+export interface GainBucket {
   /** 区切りのキー（'YYYY-MM' または 'YYYY'） */
   bucket: string
   /** その区切りの評価損益の合計（月単位ならその月の値そのもの）。記録が1つも無ければ null */
@@ -1102,17 +1111,17 @@ export interface ProfitBucket {
 }
 
 /**
- * 評価損益を区切りごとにまとめる。
- * mf_profit は**その月の増減**（累計ではない）なので、区切りの値は**合計**で出す。
+ * 今月の投資増減を区切りごとにまとめる。
+ * この値は**その月の増減**（累計ではない）なので、区切りの値は**合計**で出す。
  * 月単位は1区切り=1ヶ月なのでその月の値そのもの、年単位はその年の合計になる。
  * 記録が無い月は「0」ではなく「不明」として合計から外す（何ヶ月ぶんかは monthCount で分かる）。
  */
-export function profitBuckets(
+export function gainBuckets(
   assets: AssetRow[],
   months: string[],
   unit: Unit,
   currentMonth: string = thisMonth(),
-): ProfitBucket[] {
+): GainBucket[] {
   const snap = assetSnapshotFilled(assets, months, currentMonth)
   const valueOf = (m: string) => snap.get(m)?.profit ?? null
   const totals = sumByBucket(months, unit, valueOf)

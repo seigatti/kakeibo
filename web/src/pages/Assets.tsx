@@ -1,19 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Bar, Line } from 'react-chartjs-2'
+import Collapsible from '../components/Collapsible'
 import HelpTip from '../components/HelpTip'
 import Modal from '../components/Modal'
 import LoanTotalsCard from '../components/LoanTotalsCard'
 import PeriodPicker, { inRange, usePeriod } from '../components/PeriodPicker'
 import { useStore } from '../store'
 import type { AssetRow } from '../types'
-import { assetTotal, sortedAssets, thisMonth, today, yen, yenShort } from '../utils'
+import { assetTotal, monthlyGainOf, sortedAssets, thisMonth, today, yen, yenShort } from '../utils'
 import LiabilityCard from './LiabilityCard'
 
-const PREFILL_KEYS = ['investment', 'cash', 'pension', 'profit', 'gain'] as const
+const PREFILL_KEYS = ['investment', 'cash', 'pension', 'gain'] as const
 
 const HIST_LIMIT_KEY = 'kakeibo.assetHistoryLimit'
-/** 記録履歴の表示件数。0 = 全件 */
-const HIST_LIMITS: Array<[number, string]> = [[10, '10件'], [30, '30件'], [100, '100件'], [0, '全件']]
+/** 記録履歴の表示件数。0 = 全件。既定は3件（直近だけ見えればよく、必要なら増やす） */
+const HIST_LIMITS: Array<[number, string]> = [[3, '3件'], [10, '10件'], [30, '30件'], [0, '全件']]
+const DEFAULT_HIST_LIMIT = 3
 
 // 全期間表示でも横軸ラベルが潰れないように間引く
 const xTicks = { ticks: { maxTicksLimit: 12, maxRotation: 0 } }
@@ -24,18 +26,25 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
   const [investment, setInvestment] = useState('')
   const [cash, setCash] = useState('')
   const [pension, setPension] = useState('')
-  const [profit, setProfit] = useState('')
   const [gain, setGain] = useState('')
   const [memo, setMemo] = useState('')
   const [msg, setMsg] = useState('')
+  // 入力欄は既定で畳んでおく。記録履歴の行を押したときは開いて中身を見せる
+  const [formOpen, setFormOpen] = useState(false)
   // 記録履歴の表示件数（0=全件）。選択は端末に覚えさせる
-  const [histLimit, setHistLimit] = useState(() => Number(localStorage.getItem(HIST_LIMIT_KEY) ?? '10'))
+  const [histLimit, setHistLimit] = useState(() => {
+    // 未保存(null)を Number() に通すと 0（＝全件）になってしまうので、文字列のまま判定する
+    const raw = localStorage.getItem(HIST_LIMIT_KEY)
+    if (raw === null) return DEFAULT_HIST_LIMIT
+    const saved = Number(raw)
+    return HIST_LIMITS.some(([v]) => v === saved) ? saved : DEFAULT_HIST_LIMIT
+  })
   // 日付変更の対象（モーダル）
   const [dateEdit, setDateEdit] = useState<{ row: AssetRow; to: string } | null>(null)
   const appliedPrefill = useRef<string | null>(null)
 
   const assets = useMemo(() => sortedAssets(data?.assets ?? []), [data])
-  // 表示期間（このタブの3グラフ共通。既定=全期間）
+  // 表示期間（このタブのグラフ共通。既定=全期間）
   const period = usePeriod(assets.length ? assets[0].date.slice(0, 7) : thisMonth())
 
   const num = (s: string | undefined) => (!s || s.trim() === '' ? null : Number(s.replace(/[,，]/g, '')))
@@ -47,9 +56,15 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
     setInvestment(overrides?.investment ?? hit?.investment?.toString() ?? '')
     setCash(overrides?.cash ?? hit?.cash?.toString() ?? '')
     setPension(overrides?.pension ?? hit?.pension?.toString() ?? '')
-    setProfit(overrides?.profit ?? hit?.mf_profit?.toString() ?? '')
-    setGain(overrides?.gain ?? hit?.monthly_gain?.toString() ?? '')
+    setGain(overrides?.gain ?? (hit ? monthlyGainOf(hit)?.toString() ?? '' : ''))
     setMemo(hit?.memo ?? '')
+  }
+
+  /** 記録履歴の行を押したとき: その記録を読み込み、畳んでいる入力欄を開く */
+  const editRow = (a: AssetRow) => {
+    applyRow(a.date)
+    setFormOpen(true)
+    setMsg('')
   }
 
   // ブックマークレットからのプリフィル（#assets?investment=…&autosave=1 など）。
@@ -65,6 +80,7 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
     const overrides: Partial<Record<(typeof PREFILL_KEYS)[number], string>> = {}
     for (const k of PREFILL_KEYS) if (prefill.get(k)) overrides[k] = prefill.get(k)!
     applyRow(d, overrides)
+    setFormOpen(true)
 
     if (prefill.get('autosave') === '1') {
       const hit = assets.find((a) => a.date === d)
@@ -73,8 +89,9 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
         investment: overrides.investment !== undefined ? num(overrides.investment) : (hit?.investment ?? null),
         cash: overrides.cash !== undefined ? num(overrides.cash) : (hit?.cash ?? null),
         pension: overrides.pension !== undefined ? num(overrides.pension) : (hit?.pension ?? null),
-        mf_profit: overrides.profit !== undefined ? num(overrides.profit) : (hit?.mf_profit ?? null),
-        monthly_gain: overrides.gain !== undefined ? num(overrides.gain) : (hit?.monthly_gain ?? null),
+        // 旧「評価損益」列は統合済み。新しい列だけに書き、旧列は空にして片付ける
+        mf_profit: null,
+        monthly_gain: overrides.gain !== undefined ? num(overrides.gain) : (hit ? monthlyGainOf(hit) : null),
         memo: hit?.memo ?? '自動記録',
       }
       mutate('upsertAsset', { row })
@@ -92,19 +109,25 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
     [assets, period.from, period.to],
   )
 
-  const profits = filtered.filter((a) => a.mf_profit !== null)
-
-  // 今月の投資増減: 月ごとに最後の記録（月末値）を採用して棒グラフ化
-  const gains = useMemo(() => {
-    const byMonth = new Map<string, number>()
-    for (const a of filtered) if (a.monthly_gain !== null) byMonth.set(a.date.slice(0, 7), a.monthly_gain)
-    return [...byMonth.entries()].sort(([a], [b]) => a.localeCompare(b))
-  }, [filtered])
+  /** 今月の投資増減（記録のある日付だけ）。旧「評価損益」列の履歴も monthlyGainOf で拾う */
+  const gains = useMemo(
+    () => filtered.map((a) => ({ date: a.date, v: monthlyGainOf(a) })).filter((g) => g.v !== null),
+    [filtered],
+  )
 
   const save = async () => {
     setMsg('')
     await mutate('upsertAsset', {
-      row: { date, investment: num(investment), cash: num(cash), pension: num(pension), mf_profit: num(profit), monthly_gain: num(gain), memo: memo || null },
+      row: {
+        date,
+        investment: num(investment),
+        cash: num(cash),
+        pension: num(pension),
+        // 統合後は monthly_gain が正。旧列は null にして触った行から順に片付ける
+        mf_profit: null,
+        monthly_gain: num(gain),
+        memo: memo || null,
+      },
     })
     setMsg(`${date} の記録を保存しました`)
   }
@@ -143,35 +166,100 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
     spanGaps: true,
   }
 
+  /** 記録履歴の2段目。値がある項目だけを並べる */
+  const breakdownOf = (a: AssetRow) => {
+    const parts: Array<{ k: string; v: number; cls?: string }> = []
+    if (a.investment !== null) parts.push({ k: '投資', v: a.investment })
+    if (a.cash !== null) parts.push({ k: '現金', v: a.cash })
+    if (a.pension !== null) parts.push({ k: '年金', v: a.pension })
+    const g = monthlyGainOf(a)
+    if (g !== null) parts.push({ k: '増減', v: g, cls: g >= 0 ? 'pos' : 'neg' })
+    return parts
+  }
+
   return (
     <>
       <div className="card">
         <h2>資産を記録（過去日付もOK）</h2>
         <label className="field">日付<input type="date" value={date} onChange={(e) => applyRow(e.target.value)} /></label>
-        <div className="row2">
-          <label className="field">投資（マネフォ流動資産）
-            <input type="text" inputMode="numeric" placeholder="例: 10070377" value={investment} onChange={(e) => setInvestment(e.target.value)} /></label>
-          <label className="field">現金（Zaim残高）
-            <input type="text" inputMode="numeric" placeholder="例: 2071561" value={cash} onChange={(e) => setCash(e.target.value)} /></label>
-        </div>
-        <div className="row2">
-          <label className="field">年金
-            <input type="text" inputMode="numeric" placeholder="任意" value={pension} onChange={(e) => setPension(e.target.value)} /></label>
-          <label className="field">評価損益（その月の増減）
-            <input type="text" inputMode="numeric" placeholder="任意" value={profit} onChange={(e) => setProfit(e.target.value)} /></label>
-        </div>
-        <label className="field">
-          今月の投資増減
-          <HelpTip title="今月の投資増減">
-            マネフォの「今月の増減」＝マネフォに登録した投資系資産（投信・株・年金・外貨など）の前月比です。値動きだけでなく、その月の積立入金による増加分も含みます。マネフォ用ブックマークレットで自動入力されます。
-          </HelpTip>
-          <input type="text" inputMode="numeric" placeholder="任意（例: +355766）" value={gain} onChange={(e) => setGain(e.target.value)} /></label>
-        <label className="field">メモ<input type="text" value={memo} onChange={(e) => setMemo(e.target.value)} /></label>
+        <Collapsible
+          title="金額を入力"
+          hint={`投資 ${investment || '−'} / 現金 ${cash || '−'}`}
+          open={formOpen}
+          onToggle={setFormOpen}
+        >
+          <div className="row2">
+            <label className="field">投資（マネフォ流動資産）
+              <input type="text" inputMode="numeric" placeholder="例: 10070377" value={investment} onChange={(e) => setInvestment(e.target.value)} /></label>
+            <label className="field">現金（Zaim残高）
+              <input type="text" inputMode="numeric" placeholder="例: 2071561" value={cash} onChange={(e) => setCash(e.target.value)} /></label>
+          </div>
+          <div className="row2">
+            <label className="field">年金
+              <input type="text" inputMode="numeric" placeholder="任意" value={pension} onChange={(e) => setPension(e.target.value)} /></label>
+            <label className="field">
+              今月の投資増減
+              <HelpTip title="今月の投資増減">
+                マネーフォワードの総資産ページにある<b>「今月 +◯◯円」</b>の値です。
+                前月からの投資額の増減（値動き）を表し、プラスにもマイナスにもなります。
+                {'\n'}マネフォ用ブックマークレットで自動入力されます。
+                {'\n'}以前は「評価損益」と2つに分かれていましたが、同じ値を指していたので1つにまとめました。
+                過去に「評価損益」へ入れた分もそのまま引き継いで表示します。
+              </HelpTip>
+              <input type="text" inputMode="numeric" placeholder="任意（例: +72991）" value={gain} onChange={(e) => setGain(e.target.value)} /></label>
+          </div>
+          <label className="field">メモ<input type="text" value={memo} onChange={(e) => setMemo(e.target.value)} /></label>
+        </Collapsible>
         <button className="btn" onClick={() => void save()} disabled={saving}>{saving ? '保存中…' : '保存'}</button>
         {msg && <p className="pos center" style={{ margin: '8px 0 0' }}>{msg}</p>}
       </div>
 
-      {/* 期間バーの sticky はこの div の中でだけ効く（下の負債・記録履歴までは追従させない） */}
+      {assets.length > 0 && (
+        <div className="card">
+          <h2>記録履歴（新しい順）{histRows.length}件 / 全{assets.length}件</h2>
+          <ul className="list">
+            {histRows.map((a) => (
+              <li
+                key={a.date}
+                className={`row-pick${a.date === date ? ' on' : ''}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => editRow(a)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); editRow(a) } }}
+              >
+                <span className="muted">{a.date}</span>
+                <span>{yen(assetTotal(a))}</span>
+                {/* 行の押下で編集に入るので、ボタンは伝播を止める */}
+                <button className="btn small secondary" onClick={(e) => { e.stopPropagation(); setDateEdit({ row: a, to: a.date }) }}>日付</button>
+                <button className="btn danger small" onClick={(e) => { e.stopPropagation(); void remove(a.date) }}>削除</button>
+                <span className="muted row-sub">
+                  {breakdownOf(a).map((p, i) => (
+                    <span key={p.k}>
+                      {i > 0 && ' / '}
+                      {p.k} <span className={p.cls}>{p.k === '増減' && p.v >= 0 ? '+' : ''}{yenShort(p.v)}</span>
+                    </span>
+                  ))}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <div className="seg" style={{ marginTop: 8, marginBottom: 0 }}>
+            {HIST_LIMITS.map(([v, label]) => (
+              <button key={v} className={histLimit === v ? 'on' : ''}
+                onClick={() => { setHistLimit(v); localStorage.setItem(HIST_LIMIT_KEY, String(v)) }}>{label}</button>
+            ))}
+          </div>
+          <p className="muted" style={{ fontSize: 12, margin: '8px 0 0' }}>
+            行をタップすると上の入力欄に読み込んで編集できます。「日付」から日付だけを変えた移動・コピーができます。
+          </p>
+        </div>
+      )}
+
+      <LiabilityCard />
+
+      <LoanTotalsCard liabilities={data?.liabilities ?? []} />
+
+      {/* 期間バーの sticky はこの div の中でだけ効く */}
       <div>
       {assets.length >= 2 && <PeriodPicker period={period} note="下の資産グラフ共通" />}
 
@@ -195,17 +283,23 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
         </div>
       )}
 
-      {profits.length >= 2 && (
+      {gains.length >= 2 && (
         <div className="card">
-          <h2>評価損益（その月の増減）の推移</h2>
+          <h2>
+            今月の投資増減の推移
+            <HelpTip title="今月の投資増減の推移">
+              マネフォの「今月 +◯◯円」＝前月からの投資額の増減です。記録した日付ごとに並べています。
+              {'\n'}ホームのグラフでは月単位・年単位（その年の合計）に切り替えられます。
+            </HelpTip>
+          </h2>
           <div className="chart-box small">
             <Bar
               data={{
-                labels: profits.map((a) => a.date.slice(2, 10)),
+                labels: gains.map((g) => g.date.slice(2, 10)),
                 datasets: [{
-                  label: 'その月の評価損益',
-                  data: profits.map((a) => a.mf_profit),
-                  backgroundColor: profits.map((a) => ((a.mf_profit ?? 0) >= 0 ? '#4ade80' : '#f87171')),
+                  label: '今月の投資増減',
+                  data: gains.map((g) => g.v),
+                  backgroundColor: gains.map((g) => ((g.v ?? 0) >= 0 ? '#4ade80' : '#f87171')),
                 }],
               }}
               options={{ ...lineOpts, plugins: { legend: { display: false } } }}
@@ -214,64 +308,7 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
         </div>
       )}
 
-      {gains.length >= 2 && (
-        <div className="card">
-          <h2>
-            今月の投資増減の推移
-            <HelpTip title="今月の投資増減の推移">
-              各月の最後の記録時点での「今月の増減」（マネフォ投資系資産の前月比）です。月ごとにどれだけ増えた/減ったかの推移を表します。
-            </HelpTip>
-          </h2>
-          <div className="chart-box small">
-            <Bar
-              data={{
-                labels: gains.map(([m]) => m.slice(2)),
-                datasets: [{
-                  label: '今月の投資増減',
-                  data: gains.map(([, v]) => v),
-                  backgroundColor: gains.map(([, v]) => (v >= 0 ? '#4ade80' : '#f87171')),
-                }],
-              }}
-              options={{
-                maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
-                scales: { y: { ticks: { callback: (v) => yenShort(Number(v)) } }, x: xTicks },
-              }}
-            />
-          </div>
-        </div>
-      )}
-
       </div>
-
-      <LiabilityCard />
-
-      <LoanTotalsCard liabilities={data?.liabilities ?? []} />
-
-      {assets.length > 0 && (
-        <div className="card">
-          <h2>記録履歴（新しい順）{histRows.length}件 / 全{assets.length}件</h2>
-          <div className="seg">
-            {HIST_LIMITS.map(([v, label]) => (
-              <button key={v} className={histLimit === v ? 'on' : ''}
-                onClick={() => { setHistLimit(v); localStorage.setItem(HIST_LIMIT_KEY, String(v)) }}>{label}</button>
-            ))}
-          </div>
-          <ul className="list">
-            {histRows.map((a) => (
-              <li key={a.date}>
-                <span className="muted" style={{ cursor: 'pointer' }} onClick={() => applyRow(a.date)}>{a.date}</span>
-                <span>{yen(assetTotal(a))}</span>
-                <button className="btn small secondary" onClick={() => setDateEdit({ row: a, to: a.date })}>日付</button>
-                <button className="btn danger small" onClick={() => void remove(a.date)}>削除</button>
-              </li>
-            ))}
-          </ul>
-          <p className="muted" style={{ fontSize: 12, margin: '8px 0 0' }}>
-            日付をタップすると上の入力欄に読み込みます。「日付」から日付だけを変えた移動・コピーができます。
-          </p>
-        </div>
-      )}
 
       {dateEdit && (
         <Modal title="日付を変更" onClose={() => setDateEdit(null)}>
@@ -293,7 +330,7 @@ export default function Assets({ prefill }: { prefill: URLSearchParams }) {
               onClick={() => void changeDate(dateEdit.row, dateEdit.to, true)}>移動（元を削除）</button>
           </div>
           <p className="muted" style={{ fontSize: 12, margin: '10px 0 0' }}>
-            投資・現金・年金・評価損益・メモはそのまま引き継ぎます。
+            投資・現金・年金・今月の投資増減・メモはそのまま引き継ぎます。
           </p>
         </Modal>
       )}

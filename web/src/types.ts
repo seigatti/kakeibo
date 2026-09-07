@@ -3,10 +3,18 @@ export interface AssetRow {
   investment: number | null
   cash: number | null
   pension: number | null
-  /** **その月の評価損益（値動きの増減）**。累計ではないので、年にまとめるときは合計する */
+  /**
+   * @deprecated 旧「評価損益」列。monthly_gain と同じものを指していたので統合済み。
+   * 過去の手入力履歴が残っているので**読み取りのフォールバックとしてだけ**使う（monthlyGainOf）。
+   * 保存時は常に null を書いて、触った行から順に monthly_gain へ寄せていく。
+   */
   mf_profit: number | null
   memo: string | null
-  monthly_gain: number | null // マネフォ「今月の増減」（投資系資産の前月比・フロー値）
+  /**
+   * **その月の投資増減**（マネフォ総資産ページの「今月」の値）。
+   * 積み上がった累計ではなくフロー値なので、年にまとめるときは合計する。
+   */
+  monthly_gain: number | null
 }
 
 export interface ExpenseRow {

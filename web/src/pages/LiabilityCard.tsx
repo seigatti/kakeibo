@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import Collapsible from '../components/Collapsible'
 import HelpTip from '../components/HelpTip'
 import { useStore } from '../store'
 import { LIABILITY_KINDS, type LiabilityKind, type LiabilityRow } from '../types'
@@ -23,6 +24,8 @@ export default function LiabilityCard() {
   const { data, mutate, saving } = useStore()
   const [form, setForm] = useState(EMPTY)
   const [editing, setEditing] = useState(false)
+  // 入力欄は既定で畳んでおき、一覧の「編集」を押したときに開く
+  const [formOpen, setFormOpen] = useState(false)
   const [msg, setMsg] = useState('')
 
   const liabilities = data?.liabilities ?? []
@@ -47,6 +50,7 @@ export default function LiabilityCard() {
     })
     setForm(EMPTY)
     setEditing(false)
+    setFormOpen(false)
     setMsg(editing ? '更新しました ✓' : '追加しました ✓')
   }
 
@@ -63,6 +67,7 @@ export default function LiabilityCard() {
       memo: l.memo ?? '',
     })
     setEditing(true)
+    setFormOpen(true)
   }
 
   const remove = async (l: LiabilityRow) => {
@@ -104,7 +109,12 @@ export default function LiabilityCard() {
         {liabilities.length === 0 && <li className="muted">負債の登録はありません</li>}
       </ul>
 
-      <h2 style={{ marginTop: 12 }}>{editing ? '負債を編集' : '負債を追加'}</h2>
+      <Collapsible
+        title={editing ? '負債を編集' : '負債を追加'}
+        hint={editing ? form.name : ''}
+        open={formOpen}
+        onToggle={setFormOpen}
+      >
       <div className="row2">
         <label className="field">名前
           <input type="text" placeholder="例: 住宅ローン / 奨学金" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
@@ -140,8 +150,9 @@ export default function LiabilityCard() {
         {saving ? '保存中…' : editing ? '更新' : '追加'}
       </button>
       {editing && (
-        <button className="btn secondary" style={{ marginTop: 8 }} onClick={() => { setForm(EMPTY); setEditing(false) }}>キャンセル</button>
+        <button className="btn secondary" style={{ marginTop: 8 }} onClick={() => { setForm(EMPTY); setEditing(false); setFormOpen(false) }}>キャンセル</button>
       )}
+      </Collapsible>
       {msg && <p className="pos center" style={{ margin: '8px 0 0' }}>{msg}</p>}
     </div>
   )

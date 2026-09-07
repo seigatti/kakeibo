@@ -10,6 +10,11 @@ interface Props {
   /** 'section' = ページ直下の大きい見出し / 'inline' = カード内の小さい折りたたみ */
   variant?: 'section' | 'inline'
   defaultOpen?: boolean
+  /**
+   * 開閉を呼び出し側で持つとき（例: 一覧の行を押したらフォームを開く）に渡す。
+   * 渡した場合は onToggle で state を更新すること。省略時は details 任せ（defaultOpen）。
+   */
+  open?: boolean
   onToggle?: (open: boolean) => void
   children: ReactNode
 }
@@ -21,11 +26,11 @@ interface Props {
  * ボタンらしく見せる。hint の出し分けは CSS（.collapse[open] .collapse-hint）で行うので、
  * このコンポーネント自体は開閉の state を持たない。
  */
-export default function Collapsible({ title, hint, variant = 'inline', defaultOpen, onToggle, children }: Props) {
+export default function Collapsible({ title, hint, variant = 'inline', defaultOpen, open, onToggle, children }: Props) {
   return (
     <details
       className={`collapse ${variant}`}
-      open={defaultOpen}
+      open={open ?? defaultOpen}
       onToggle={(e) => onToggle?.((e.target as HTMLDetailsElement).open)}
     >
       <summary>

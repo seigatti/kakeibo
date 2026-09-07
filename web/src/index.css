@@ -257,6 +257,27 @@ button {
   border-bottom: none;
 }
 
+/* 一覧の行そのものを押して編集に入る行（資産の記録履歴など）。
+   2段目（.row-sub）に内訳を出すので flex-wrap で折り返す */
+.list li.row-pick {
+  flex-wrap: wrap;
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 7px 6px;
+}
+.list li.row-pick:hover {
+  background: var(--bg3);
+}
+.list li.row-pick.on {
+  background: var(--bg3);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.list li.row-pick .row-sub {
+  flex: 1 1 100%;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
 .kv {
   display: flex;
   justify-content: space-between;

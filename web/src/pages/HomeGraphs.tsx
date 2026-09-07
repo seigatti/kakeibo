@@ -28,12 +28,13 @@ import {
   bucketsOf,
   isMasked,
   lastByBucket,
+  monthlyGainOf,
   netWorthOver,
   sumByBucket,
   nonInvestBreakdownByMonth,
   otherIncomeByMonth,
   periodSummary,
-  profitBuckets,
+  gainBuckets,
   savingsRateByMonth,
   snapshotBucket,
   sortedAssets,
@@ -77,6 +78,7 @@ export default function HomeGraphs({ data }: { data: AllData }) {
   const assets = useMemo(() => sortedAssets(data.assets), [data])
   const latest = assets[assets.length - 1]
   const prev = assets[assets.length - 2]
+  const latestGain = latest ? monthlyGainOf(latest) : null
   const itemDiffs = useMemo(() => assetItemDiffs(data.assets), [data])
   const liabilities = data.liabilities ?? []
 
@@ -108,7 +110,6 @@ export default function HomeGraphs({ data }: { data: AllData }) {
   }, [latest])
   // 資産系のグラフは「実績の最古月〜表示終了月」の月グリッドで作る。
   // 記録が無い月は前月から引き継ぎ（assetSnapshotFilled）、表示期間で切るのは最後。
-  // 年の増加分（評価損益）は前年末の値が要るので、期間の外まで計算しておく必要がある。
   const assetAllMonths = useMemo(() => monthRange(assetEarliest, period.to), [assetEarliest, period.to])
   const assetSnap = useMemo(() => assetSnapshotFilled(data.assets, assetAllMonths, month), [data, assetAllMonths, month])
   const assetMonths = useMemo(
@@ -121,15 +122,6 @@ export default function HomeGraphs({ data }: { data: AllData }) {
     () => assetAllocationTrend(data.assets, assetAllMonths, month).filter((p) => inRange(p.month, period.from, period.to)),
     [data, assetAllMonths, month, period.from, period.to],
   )
-  const assetRecent = useMemo(
-    () => assets.filter((a) => inRange(a.date.slice(0, 7), period.from, period.to)),
-    [assets, period.from, period.to],
-  )
-  const gains = useMemo(() => {
-    const byMonth = new Map<string, number>()
-    for (const a of assetRecent) if (a.monthly_gain !== null) byMonth.set(a.date.slice(0, 7), a.monthly_gain)
-    return [...byMonth.entries()].sort(([a], [b]) => a.localeCompare(b))
-  }, [assetRecent])
 
   // ---- 収支（period に追従） ----
   const chartMonths = useMemo(() => monthRange(period.from, period.to), [period.from, period.to])
@@ -243,12 +235,12 @@ export default function HomeGraphs({ data }: { data: AllData }) {
     return m && carriedAt(m) ? '※ この月は記録が無いため前月から引き継ぎ' : ''
   }
   /**
-   * 評価損益。mf_profit は**その月の増減**（累計ではない）なので、
+   * 今月の投資増減。**その月の増減**（累計ではない）なので、
    * 月単位はその月の値、年単位はその年の合計を出す。
    */
-  const profitSeries = useMemo(
+  const gainSeries = useMemo(
     () =>
-      profitBuckets(data.assets, assetAllMonths, unit, month)
+      gainBuckets(data.assets, assetAllMonths, unit, month)
         .filter((b) => bucketInRange(b.bucket, unit, period.from, period.to))
         .filter((b) => b.total !== null),
     [data, assetAllMonths, unit, month, period.from, period.to],
@@ -264,8 +256,6 @@ export default function HomeGraphs({ data }: { data: AllData }) {
   const netWorthMonths = netWorthSeries.map((p) => p.month)
   const netWorthMap = new Map(netWorthSeries.map((p) => [p.month, p]))
   const netWorthAt = (m: string) => netWorthMap.get(m) ?? null
-  const gainMap = new Map(gains)
-  const gainSeries = flow(gains.map(([m]) => m), (m) => gainMap.get(m) ?? null)
 
   // 累積収支は「積み上がった値」なので区切りの最後を採る
   const cumMonths = cumulative.map((r) => r.m)
@@ -341,17 +331,11 @@ export default function HomeGraphs({ data }: { data: AllData }) {
                   )}
                 </span>
               </div>
-              {typeof latest.mf_profit === 'number' && (
-                <div className="stat">
-                  <span className="k">評価損益（今月）</span>
-                  <span className={`v ${latest.mf_profit >= 0 ? 'pos' : 'neg'}`}>{yen(latest.mf_profit)}</span>
-                </div>
-              )}
-              {typeof latest.monthly_gain === 'number' && (
+              {latestGain !== null && (
                 <div className="stat">
                   <span className="k">今月の投資増減</span>
-                  <span className={`v ${latest.monthly_gain >= 0 ? 'pos' : 'neg'}`}>
-                    {latest.monthly_gain >= 0 ? '+' : ''}{yen(latest.monthly_gain)}
+                  <span className={`v ${latestGain >= 0 ? 'pos' : 'neg'}`}>
+                    {latestGain >= 0 ? '+' : ''}{yen(latestGain)}
                   </span>
                 </div>
               )}
@@ -480,28 +464,28 @@ export default function HomeGraphs({ data }: { data: AllData }) {
 
         <LoanTotalsCard liabilities={liabilities} />
 
-        {profitSeries.length >= 2 && (
+        {gainSeries.length >= 2 && (
           <div className="card">
             <h2>
-              {unit === 'year' ? '評価損益（年合計）' : '評価損益の推移（その月の増減）'}
-              <HelpTip title="評価損益の見かた">
-                資産タブに入れている「評価損益」は<b>その月の増減</b>（値動き）です。
+              {unit === 'year' ? '今月の投資増減（年合計）' : '今月の投資増減の推移'}
+              <HelpTip title="今月の投資増減の見かた">
+                マネーフォワードの総資産ページにある<b>「今月 +◯◯円」</b>の値です。
                 積み上がった累計ではないので、プラスとマイナスが行き来します。
                 <br /><b>月単位</b>はその月の値をそのまま、<b>年単位はその年の合計</b>を出します
                 （例: 1月 +84,432 / 2月 − 55,787 … を全部足した額）。
                 <br />記録が無い月は「0」ではなく「不明」として<b>合計に入れません</b>。
                 何ヶ月ぶんの合計かは、横軸の「(Nヶ月)」で分かります（12ヶ月そろっていれば年のだけ）。
-                <br />積立などの入金を含む「今月の投資増減」とは別の数字で、こちらは<b>値動きだけ</b>です。
+                <br />以前は「評価損益」と「今月の投資増減」の2つに分かれていましたが、同じ値を指していたので1つにまとめました。
               </HelpTip>
             </h2>
             <div className="chart-box small">
               <Bar
                 data={{
-                  labels: profitSeries.map((b) => bucketLabel(b.bucket, unit, b.monthCount)),
+                  labels: gainSeries.map((b) => bucketLabel(b.bucket, unit, b.monthCount)),
                   datasets: [{
-                    label: unit === 'year' ? '評価損益（年合計）' : 'その月の評価損益',
-                    data: profitSeries.map((b) => b.total),
-                    backgroundColor: profitSeries.map((b) => ((b.total ?? 0) >= 0 ? '#4ade80' : '#f87171')),
+                    label: unit === 'year' ? '今月の投資増減（年合計）' : '今月の投資増減',
+                    data: gainSeries.map((b) => b.total),
+                    backgroundColor: gainSeries.map((b) => ((b.total ?? 0) >= 0 ? '#4ade80' : '#f87171')),
                   }],
                 }}
                 options={{ maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: monthYenScales }}
@@ -510,17 +494,6 @@ export default function HomeGraphs({ data }: { data: AllData }) {
           </div>
         )}
 
-        {gains.length >= 2 && (
-          <div className="card">
-            <h2>今月の投資増減の推移</h2>
-            <div className="chart-box small">
-              <Bar
-                data={{ labels: axisOf(gains.map(([m]) => m)), datasets: [{ label: unit === 'year' ? '投資増減（年合計）' : '今月の投資増減', data: gainSeries, backgroundColor: gainSeries.map((v) => ((v ?? 0) >= 0 ? '#4ade80' : '#f87171')) }] }}
-                options={{ maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: monthYenScales }}
-              />
-            </div>
-          </div>
-        )}
       </Collapsible>
 
       {/* ===================== 収支 ===================== */}
